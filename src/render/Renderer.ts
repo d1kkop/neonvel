@@ -1,0 +1,163 @@
+import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+
+export const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 1100);
+
+/** WebGL renderer + post-processing chain (render → bloom → tone map / sRGB output). */
+export class Renderer {
+  readonly webgl: THREE.WebGLRenderer;
+  readonly composer: EffectComposer;
+  readonly bloom: UnrealBloomPass;
+  private readonly renderPass: RenderPass;
+
+  constructor(container: HTMLElement, scene: THREE.Scene, camera: THREE.Camera) {
+    this.webgl = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    this.webgl.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.25 : 1.5));
+    this.webgl.setSize(window.innerWidth, window.innerHeight);
+    this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
+    this.webgl.toneMappingExposure = 1.1;
+    this.webgl.outputColorSpace = THREE.SRGBColorSpace;
+    container.appendChild(this.webgl.domElement);
+
+    const size = this.webgl.getDrawingBufferSize(new THREE.Vector2());
+    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: isMobile ? 0 : 4 });
+    this.composer = new EffectComposer(this.webgl, rt);
+    this.renderPass = new RenderPass(scene, camera);
+    this.composer.addPass(this.renderPass);
+    // Safety net: a single NaN / infinite pixel (from any shader) would be smeared over the whole frame
+    // by the bloom blur and turn the screen black. Scrub those (and absurd HDR values) first.
+    this.composer.addPass(new ShaderPass({
+      uniforms: { tDiffuse: { value: null } },
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+        void main() {
+          vec4 c = texture2D(tDiffuse, vUv);
+          bool bad = any(isnan(c)) || any(isinf(c)) || !(c.r == c.r) || !(c.g == c.g) || !(c.b == c.b);
+          gl_FragColor = bad ? vec4(0.0, 0.0, 0.0, 1.0) : vec4(clamp(c.rgb, 0.0, 64.0), c.a);
+        }`,
+    }));
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.32, 0.3, 1.15);
+    this.composer.addPass(this.bloom);
+    this.composer.addPass(new OutputPass());
+  }
+
+  setScene(scene: THREE.Scene, camera: THREE.Camera): void {
+    this.renderPass.scene = scene;
+    this.renderPass.camera = camera;
+  }
+
+  resize(): void {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    this.webgl.setSize(w, h);
+    this.composer.setPixelRatio(this.webgl.getPixelRatio());
+    this.composer.setSize(w, h);
+  }
+
+  render(): void {
+    this.composer.render();
+  }
+}
+
+/**
+ * A small synthetic environment for metallic reflections (car paint etc.), coloured per level.
+ * Returns the PMREM render target: dispose the *target* (not just its texture) to free GPU memory.
+ */
+export function createEnvironment(
+  renderer: THREE.WebGLRenderer,
+  env: { top: string; horizon: string; ground: string; panels: string[] } = {
+    top: '#05030d', horizon: '#ff3c8e', ground: '#991a59', panels: ['#00e5ff', '#ff2bd6', '#ffae5c', '#ffffff'],
+  },
+): THREE.WebGLRenderTarget {
+  const scene = new THREE.Scene();
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(50, 32, 16),
+    new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      uniforms: { uTop: { value: new THREE.Color(env.top) }, uHor: { value: new THREE.Color(env.horizon) }, uGround: { value: new THREE.Color(env.ground) } },
+      vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      fragmentShader: `uniform vec3 uTop, uHor, uGround; varying vec3 vP; void main(){
+        float y = normalize(vP).y;
+        vec3 c = mix(uHor, uTop, smoothstep(0.0, 0.7, y));
+        c = mix(c, uGround, smoothstep(0.0, -0.3, y));
+        gl_FragColor = vec4(c, 1.0); }`,
+    }),
+  );
+  scene.add(sky);
+  const panelPos: [number, number, number][] = [[-20, 5, 0], [20, 5, 0], [0, 20, 0], [0, 8, -30]];
+  const panelScale: [number, number, number][] = [[1, 3, 30], [1, 3, 30], [4, 1, 40], [20, 6, 1]];
+  env.panels.slice(0, 4).forEach((c, i) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(4) }));
+    m.position.set(...panelPos[i]);
+    m.scale.set(...panelScale[i]);
+    scene.add(m);
+  });
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const target = pmrem.fromScene(scene, 0.03);
+  pmrem.dispose();
+  scene.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh) {
+      mesh.geometry.dispose();
+      (mesh.material as THREE.Material).dispose();
+    }
+  });
+  return target;
+}
+
+/**
+ * Rear-view mirror: renders the scene from a rear camera into a small HDR target, then draws it
+ * (tone-mapped, horizontally flipped like a real mirror) into a strip at the top of the screen.
+ */
+export class Mirror {
+  readonly camera = new THREE.PerspectiveCamera(42, 4, 0.1, 3000);
+  private readonly rt: THREE.WebGLRenderTarget;
+  private readonly quadScene = new THREE.Scene();
+  private readonly quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  private readonly size = new THREE.Vector2();
+  /** Mirror rectangle in CSS pixels (top-left origin). */
+  rect = { x: 0, y: 0, w: 0, h: 0 };
+
+  constructor() {
+    this.rt = new THREE.WebGLRenderTarget(512, 128, { type: THREE.HalfFloatType });
+    this.rt.texture.wrapS = THREE.RepeatWrapping;
+    this.rt.texture.repeat.set(-1, 1);
+    this.rt.texture.offset.set(1, 0);
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: this.rt.texture, depthTest: false }));
+    this.quadScene.add(quad);
+  }
+
+  layout(): void {
+    const w = Math.min(window.innerWidth * 0.34, 460);
+    const h = Math.round(w / 4.2);
+    this.rect = { x: Math.round((window.innerWidth - w) / 2), y: 12, w: Math.round(w), h };
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+
+  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene): void {
+    const { x, y, w, h } = this.rect;
+    if (w <= 0) return;
+    const dpr = renderer.getPixelRatio();
+    const tw = Math.max(64, Math.round(w * dpr)), th = Math.max(16, Math.round(h * dpr));
+    if (this.rt.width !== tw || this.rt.height !== th) this.rt.setSize(tw, th);
+    renderer.setRenderTarget(this.rt);
+    renderer.render(scene, this.camera);
+    renderer.setRenderTarget(null);
+    renderer.getSize(this.size);
+    renderer.setScissorTest(true);
+    renderer.setViewport(x, this.size.y - y - h, w, h);
+    renderer.setScissor(x, this.size.y - y - h, w, h);
+    renderer.render(this.quadScene, this.quadCam);
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, this.size.x, this.size.y);
+  }
+
+  dispose(): void {
+    this.rt.dispose();
+  }
+}

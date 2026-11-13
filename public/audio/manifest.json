@@ -1,0 +1,10 @@
+{
+  "_comment": "Recorded music tracks (in this folder). Entries: { id, file, title }. They appear in Options > Music next to the procedural songs.",
+  "music": [
+    {
+      "id": "space-city",
+      "file": "space_city_bpm115.mp3",
+      "title": "Space City — MintoDog (CC0)"
+    }
+  ]
+}
