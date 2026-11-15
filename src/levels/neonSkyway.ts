@@ -18,6 +18,7 @@ export const neonSkyway: LevelDef = {
     ],
     length: 2800,
     height: 150,
+    hills: [[2, 7, 0.3], [5, 2.5, 1.1]], // gentle ramps on the skyway (tests the slope-following road mirror)
     width: 18,
     lanes: 4,
     pillars: true,

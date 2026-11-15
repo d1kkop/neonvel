@@ -58,7 +58,7 @@ const DEFAULTS: Settings = {
   serverUrl: `ws://${location.hostname || 'localhost'}:8787`,
   rating: START_RATING,
   games: 0,
-  version: 3,
+  version: 4,
 };
 
 export function loadSettings(): Settings {
@@ -79,6 +79,13 @@ export function loadSettings(): Settings {
       if (s.version < 3) {
         s.volume.ambience = Math.min(s.volume.ambience, 0.12);
         s.version = 3;
+      }
+      // v4: forget remembered weather picks once, so every level opens in its own default weather again
+      // (Palm Coast sunny, …); fog is now a separate toggle.
+      if (s.version < 4) {
+        s.weather = {};
+        s.fog = {};
+        s.version = 4;
       }
       return s;
     }

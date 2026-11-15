@@ -31,129 +31,138 @@ export interface CarStyle {
   /** Rear wheels bigger than the fronts (muscle stance). */
   rearWheelScale?: number;
   /** Signature details that set the silhouettes apart. */
-  features?: ('popups' | 'hoodScoop' | 'chromeBumpers' | 'rearSkirt' | 'flares' | 'roofSpoiler' | 'fin' | 'fenderPods')[];
+  features?: ('popups' | 'hoodScoop' | 'chromeBumpers' | 'rearSkirt' | 'flares' | 'roofSpoiler' | 'fin' | 'fenderPods' | 'vinylRoof' | 'chromeTrim' | 'louvers' | 'tailFins')[];
+  /** Wheel-arch shape: 2 = round, 4–6 = squared-off 70s/80s arches. */
+  archSquare?: number;
 }
 
 export const CAR_STYLES: Record<string, CarStyle> = {
-  /** 80s doorstop wedge: razor nose, flat sloped bonnet, pop-up lamps, side strakes, big wing. */
+  /** 80s notchback sports coupé: flat bonnet and slab sides, pop-up lamps, short boot with a lip. */
   wedge: {
     name: 'wedge',
     length: 4.4,
-    width: 1.96,
-    body: [[0.0, 0.42, 0.22, 0.78], [0.06, 0.55, 0.18, 0.92], [0.3, 0.74, 0.18, 1.0], [0.62, 0.86, 0.18, 1.0], [0.9, 0.9, 0.2, 1.0], [1.0, 0.88, 0.3, 0.95]],
-    bodyExp: 7,
-    bodyTumble: 0.1,
-    cabin: [[0.36, 0.82, 0.76, 0.72], [0.46, 1.1, 0.78, 0.7], [0.6, 1.13, 0.82, 0.68], [0.72, 1.0, 0.86, 0.66], [0.8, 0.9, 0.86, 0.6]],
-    cabinExp: 6,
-    cabinTumble: 0.3,
-    wheelRadius: 0.35,
-    wheelT: [0.2, 0.79],
-    strakes: true,
-    spoiler: 'wing',
-    features: ['popups'],
-  },
-  /** Muscle car: long bonnet with a scoop, slab sides, upright cabin far back, chrome bumpers, fat rears. */
-  muscle: {
-    name: 'muscle',
-    length: 4.9,
-    width: 1.98,
-    body: [[0.0, 0.7, 0.28, 0.95], [0.02, 0.82, 0.24, 0.99], [0.4, 0.92, 0.22, 1.0], [0.8, 0.9, 0.22, 1.0], [0.98, 0.86, 0.26, 1.0], [1.0, 0.78, 0.32, 0.98]],
-    bodyExp: 10,
-    bodyTumble: 0.04,
-    cabin: [[0.46, 0.9, 0.86, 0.82], [0.53, 1.36, 0.88, 0.8], [0.74, 1.38, 0.88, 0.8], [0.82, 1.2, 0.88, 0.8], [0.88, 0.92, 0.88, 0.78]],
-    cabinExp: 8,
-    cabinTumble: 0.12,
-    wheelRadius: 0.37,
-    wheelT: [0.17, 0.8],
+    width: 1.86,
+    body: [[0.0, 0.5, 0.26, 0.86], [0.03, 0.6, 0.22, 0.97], [0.3, 0.7, 0.21, 1.0], [0.62, 0.78, 0.21, 1.0], [0.95, 0.8, 0.22, 1.0], [1.0, 0.76, 0.3, 0.97]],
+    bodyExp: 12,
+    bodyTumble: 0.06,
+    cabin: [[0.36, 0.76, 0.7, 0.8], [0.45, 1.06, 0.72, 0.78], [0.68, 1.08, 0.74, 0.77], [0.76, 0.94, 0.75, 0.76], [0.8, 0.8, 0.75, 0.74]],
+    cabinExp: 9,
+    cabinTumble: 0.2,
+    wheelRadius: 0.33,
+    wheelT: [0.17, 0.81],
     strakes: false,
     spoiler: 'ducktail',
-    rearWheelScale: 1.1,
-    features: ['hoodScoop', 'chromeBumpers'],
+    archSquare: 4,
+    features: ['popups'],
   },
-  /** Flowing round coupé: teardrop cabin, rear wheels hidden behind skirts. */
+  /** 70s muscle land yacht: endless bonnet with a scoop, slab sides, vinyl roof, chrome bumpers, fat rears. */
+  muscle: {
+    name: 'muscle',
+    length: 5.2,
+    width: 2.0,
+    body: [[0.0, 0.74, 0.3, 0.97], [0.02, 0.84, 0.26, 1.0], [0.45, 0.88, 0.24, 1.0], [0.82, 0.86, 0.24, 1.0], [0.99, 0.84, 0.28, 1.0], [1.0, 0.78, 0.34, 0.99]],
+    bodyExp: 16,
+    bodyTumble: 0.03,
+    cabin: [[0.46, 0.88, 0.82, 0.84], [0.52, 1.28, 0.84, 0.82], [0.76, 1.3, 0.84, 0.82], [0.84, 1.12, 0.84, 0.82], [0.88, 0.9, 0.84, 0.8]],
+    cabinExp: 12,
+    cabinTumble: 0.1,
+    wheelRadius: 0.36,
+    wheelT: [0.16, 0.8],
+    strakes: false,
+    spoiler: 'ducktail',
+    rearWheelScale: 1.08,
+    archSquare: 5,
+    features: ['hoodScoop', 'chromeBumpers', 'vinylRoof'],
+  },
+  /** 70s fastback coupé: the soft one of the bunch, rear wheels behind skirts. */
   coupe: {
     name: 'coupe',
-    length: 4.3,
+    length: 4.4,
     width: 1.86,
-    body: [[0.0, 0.46, 0.28, 0.6], [0.06, 0.6, 0.22, 0.86], [0.28, 0.72, 0.2, 0.97], [0.55, 0.84, 0.2, 1.0], [0.85, 0.86, 0.22, 0.95], [1.0, 0.66, 0.34, 0.62]],
-    bodyExp: 2.4,
-    bodyTumble: 0.2,
-    cabin: [[0.28, 0.74, 0.7, 0.76], [0.4, 1.12, 0.74, 0.72], [0.58, 1.16, 0.78, 0.68], [0.8, 0.98, 0.8, 0.6], [0.96, 0.8, 0.78, 0.4]],
-    cabinExp: 2.8,
-    cabinTumble: 0.3,
+    body: [[0.0, 0.5, 0.28, 0.7], [0.05, 0.62, 0.23, 0.9], [0.28, 0.72, 0.21, 0.98], [0.55, 0.82, 0.21, 1.0], [0.88, 0.84, 0.23, 0.97], [1.0, 0.72, 0.32, 0.8]],
+    bodyExp: 4.5,
+    bodyTumble: 0.14,
+    cabin: [[0.3, 0.74, 0.7, 0.78], [0.42, 1.08, 0.73, 0.74], [0.58, 1.12, 0.76, 0.7], [0.8, 0.96, 0.78, 0.64], [0.96, 0.8, 0.78, 0.5]],
+    cabinExp: 4.5,
+    cabinTumble: 0.24,
     wheelRadius: 0.34,
     wheelT: [0.19, 0.79],
     strakes: false,
     spoiler: 'none',
     facet: 0.15,
-    features: ['rearSkirt'],
+    features: ['rearSkirt', 'chromeTrim'],
   },
-  /** Short, tall rally hot hatch: boxy, square tailgate, bolted-on flares, roof spoiler. */
+  /** Short, tall rally hot hatch: a box with a square tailgate, bolted-on flares, roof spoiler. */
   hatch: {
     name: 'hatch',
     length: 3.75,
     width: 1.82,
-    body: [[0.0, 0.58, 0.28, 0.85], [0.05, 0.74, 0.24, 0.97], [0.25, 0.84, 0.22, 1.0], [0.9, 0.9, 0.22, 1.0], [1.0, 0.9, 0.28, 0.98]],
-    bodyExp: 8,
-    bodyTumble: 0.06,
-    cabin: [[0.3, 0.86, 0.82, 0.86], [0.4, 1.38, 0.84, 0.84], [0.93, 1.42, 0.86, 0.84], [1.0, 1.4, 0.86, 0.84]],
-    cabinExp: 9,
-    cabinTumble: 0.1,
+    body: [[0.0, 0.58, 0.28, 0.88], [0.04, 0.74, 0.24, 0.98], [0.25, 0.82, 0.22, 1.0], [0.92, 0.88, 0.22, 1.0], [1.0, 0.88, 0.28, 0.99]],
+    bodyExp: 12,
+    bodyTumble: 0.04,
+    cabin: [[0.3, 0.86, 0.82, 0.88], [0.4, 1.38, 0.84, 0.86], [0.94, 1.42, 0.86, 0.86], [1.0, 1.4, 0.86, 0.86]],
+    cabinExp: 12,
+    cabinTumble: 0.08,
     wheelRadius: 0.32,
     wheelT: [0.17, 0.83],
     strakes: false,
     spoiler: 'none',
+    archSquare: 4,
     features: ['flares', 'roofSpoiler'],
   },
-  /** Long, low grand tourer: endless bonnet, cabin pushed far back into a fastback. */
+  /** 80s personal-luxury coupé: very long and square, formal upright roof, vinyl top, chrome everywhere. */
   gt: {
     name: 'gt',
-    length: 5.1,
+    length: 5.3,
     width: 1.98,
-    body: [[0.0, 0.5, 0.24, 0.74], [0.05, 0.64, 0.2, 0.9], [0.4, 0.76, 0.18, 0.97], [0.7, 0.84, 0.18, 1.0], [0.92, 0.86, 0.2, 0.98], [1.0, 0.76, 0.3, 0.86]],
-    bodyExp: 3.4,
-    bodyTumble: 0.15,
-    cabin: [[0.44, 0.78, 0.72, 0.78], [0.54, 1.12, 0.76, 0.74], [0.66, 1.14, 0.78, 0.7], [0.88, 0.9, 0.8, 0.62], [1.0, 0.8, 0.8, 0.5]],
-    cabinExp: 3.6,
-    cabinTumble: 0.3,
-    wheelRadius: 0.37,
-    wheelT: [0.15, 0.8],
+    body: [[0.0, 0.66, 0.26, 0.94], [0.02, 0.76, 0.23, 0.99], [0.4, 0.82, 0.22, 1.0], [0.78, 0.82, 0.22, 1.0], [0.98, 0.8, 0.26, 1.0], [1.0, 0.74, 0.32, 0.98]],
+    bodyExp: 14,
+    bodyTumble: 0.04,
+    cabin: [[0.42, 0.82, 0.78, 0.8], [0.5, 1.18, 0.8, 0.78], [0.72, 1.2, 0.8, 0.78], [0.8, 1.06, 0.8, 0.78], [0.84, 0.84, 0.8, 0.76]],
+    cabinExp: 10,
+    cabinTumble: 0.12,
+    wheelRadius: 0.35,
+    wheelT: [0.16, 0.8],
     strakes: false,
     spoiler: 'none',
+    archSquare: 5,
+    features: ['chromeBumpers', 'vinylRoof', 'chromeTrim'],
   },
-  /** Le Mans prototype: narrow central tub, separate fender pods, slim canopy, shark fin, huge wing. */
+  /** Boxy endurance racer: flat-sided tub, square fender boxes, slim canopy, tail fins, big wing. */
   proto: {
     name: 'proto',
     length: 4.8,
     width: 2.0,
-    body: [[0.0, 0.34, 0.18, 0.92], [0.06, 0.46, 0.15, 0.98], [0.2, 0.54, 0.14, 0.9], [0.38, 0.6, 0.14, 0.62], [0.62, 0.74, 0.14, 0.7], [0.8, 0.82, 0.16, 1.0], [1.0, 0.8, 0.28, 0.98]],
-    bodyExp: 4,
-    bodyTumble: 0.1,
-    cabin: [[0.3, 0.62, 0.58, 0.42], [0.4, 0.98, 0.6, 0.38], [0.55, 1.02, 0.64, 0.34], [0.7, 0.86, 0.7, 0.3], [0.78, 0.74, 0.7, 0.26]],
-    cabinExp: 3.2,
-    cabinTumble: 0.35,
+    body: [[0.0, 0.36, 0.18, 0.94], [0.05, 0.46, 0.15, 0.99], [0.2, 0.54, 0.14, 0.92], [0.38, 0.6, 0.14, 0.66], [0.62, 0.72, 0.14, 0.72], [0.8, 0.8, 0.16, 1.0], [1.0, 0.8, 0.26, 1.0]],
+    bodyExp: 9,
+    bodyTumble: 0.08,
+    cabin: [[0.3, 0.6, 0.56, 0.42], [0.4, 0.96, 0.58, 0.38], [0.55, 1.0, 0.62, 0.34], [0.7, 0.84, 0.68, 0.3], [0.78, 0.72, 0.68, 0.26]],
+    cabinExp: 5,
+    cabinTumble: 0.3,
     wheelRadius: 0.36,
     wheelT: [0.17, 0.82],
     strakes: false,
     spoiler: 'wing',
-    features: ['fenderPods', 'fin'],
+    archSquare: 4,
+    features: ['fenderPods', 'tailFins'],
   },
-  /** Mid-engine hypercar: pinched waist, big rear haunches, bubble canopy far forward, fin. */
+  /** Angular mid-engine wedge: pinched waist, tall rear haunches, louvred engine cover, fin. */
   hyper: {
     name: 'hyper',
-    length: 4.7,
-    width: 2.06,
-    body: [[0.0, 0.38, 0.2, 0.84], [0.06, 0.5, 0.17, 0.95], [0.22, 0.6, 0.16, 1.0], [0.45, 0.7, 0.16, 0.86], [0.75, 0.9, 0.18, 1.0], [0.92, 0.88, 0.2, 0.98], [1.0, 0.8, 0.3, 0.92]],
-    bodyExp: 5,
-    bodyTumble: 0.14,
-    cabin: [[0.24, 0.62, 0.6, 0.6], [0.34, 1.0, 0.62, 0.56], [0.5, 1.06, 0.66, 0.5], [0.66, 0.92, 0.74, 0.44], [0.74, 0.84, 0.76, 0.36]],
-    cabinExp: 4,
-    cabinTumble: 0.34,
+    length: 4.6,
+    width: 2.04,
+    body: [[0.0, 0.4, 0.2, 0.86], [0.06, 0.5, 0.17, 0.96], [0.22, 0.6, 0.16, 1.0], [0.45, 0.68, 0.16, 0.88], [0.75, 0.9, 0.18, 1.0], [0.94, 0.9, 0.2, 1.0], [1.0, 0.86, 0.3, 0.96]],
+    bodyExp: 9,
+    bodyTumble: 0.12,
+    cabin: [[0.24, 0.62, 0.6, 0.62], [0.34, 1.0, 0.62, 0.58], [0.5, 1.04, 0.66, 0.52], [0.62, 0.92, 0.72, 0.46], [0.68, 0.84, 0.74, 0.4]],
+    cabinExp: 7,
+    cabinTumble: 0.3,
     wheelRadius: 0.36,
     wheelT: [0.2, 0.8],
-    strakes: false,
+    strakes: true,
     spoiler: 'wing',
-    features: ['fin'],
+    archSquare: 3,
+    features: ['fin', 'louvers'],
   },
   /** Origami wedge: all hard flat planes, low-poly octagonal sections, fully faceted. */
   razor: {
@@ -311,7 +320,7 @@ function buildWheel(radius: number, accent: THREE.Color, tireMat: THREE.Material
   const prof = [
     [r * 0.62, -0.13], [r * 0.9, -0.145], [r * 0.99, -0.11], [r, -0.05], [r, 0.05], [r * 0.99, 0.11], [r * 0.9, 0.145], [r * 0.62, 0.13],
   ].map(([a, b]) => new THREE.Vector2(a, b));
-  const tyre = new THREE.Mesh(new THREE.LatheGeometry(prof, 28).rotateZ(Math.PI / 2), tireMat);
+  const tyre = new THREE.Mesh(new THREE.LatheGeometry(prof, 44).rotateZ(Math.PI / 2), tireMat);
   g.add(tyre);
   // Sidewall lettering band (slightly lighter rubber) and a drilled-look brake disc behind the spokes.
   const band = new THREE.Mesh(new THREE.RingGeometry(r * 0.74, r * 0.84, 32).rotateY(Math.PI / 2), sidewallMat());
@@ -503,7 +512,7 @@ material.clearcoat *= 1.0 - 0.9 * gSeam;
 /** Section-surface point on the body at loft position t and section height uy (for placing small parts). */
 function bodySurface(style: CarStyle, hwm: number, t: number, uy: number): [number, number, number] {
   const st = interpStations(style.body, t);
-  const [ux] = sectionPoint(Math.asin(Math.pow(uy, style.bodyExp / 2)), style.bodyExp, style.bodyTumble);
+  const [ux] = sectionPoint(Math.sign(uy) * Math.asin(Math.pow(Math.abs(uy), style.bodyExp / 2)), style.bodyExp, style.bodyTumble); // works below the middle too
   return [ux * st.hw * hwm, (st.top + st.bottom) / 2 + uy * (st.top - st.bottom) / 2, -style.length / 2 + t * style.length];
 }
 
@@ -563,8 +572,19 @@ export function setCarFogGlow(k: number): void {
   }
 }
 
+/**
+ * Real-car proportions: the base station tables were drawn low (F1-ish). Road cars get noticeably taller
+ * bodies, roofs and more ground clearance; the race cars only a little. Wheels grow a bit with them.
+ */
+const HEIGHT_SCALE: Record<string, number> = { wedge: 1.14, muscle: 1.16, coupe: 1.16, hatch: 1.12, gt: 1.14, proto: 1.05, hyper: 1.07, razor: 1.12 };
+function raiseStyle(st: CarStyle): CarStyle {
+  const k = HEIGHT_SCALE[st.name] ?? 1.15;
+  const lift = (rows: Station[]): Station[] => rows.map(([t, top, bottom, hw]) => [t, top * k, bottom * (1 + (k - 1) * 1.3), hw]);
+  return { ...st, body: lift(st.body), cabin: lift(st.cabin), wheelRadius: st.wheelRadius * (1 + (k - 1) * 0.45) };
+}
+
 export function buildCar(opts: CarOptions = {}): BuiltCar {
-  const style = typeof opts.style === 'object' ? opts.style : CAR_STYLES[opts.style ?? 'wedge'];
+  const style = raiseStyle(typeof opts.style === 'object' ? opts.style : CAR_STYLES[opts.style ?? 'wedge']);
   const accent = new THREE.Color(opts.accent ?? '#00e5ff');
   const L = style.length;
   const W = style.width;
@@ -600,19 +620,21 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
   const archRs = wheelR.map((r) => r + 0.09);
   // Rear skirts: no rear wheel well, the body hangs over the top of the wheel.
   const wells = feat.has('rearSkirt') ? [0] : [0, 1];
+  const archP = style.archSquare ?? 2;
+  const archDist = (dz: number, dy: number) => (archP === 2 ? Math.hypot(dz, dy) : Math.pow(Math.abs(dz) ** archP + Math.abs(dy) ** archP, 1 / archP));
 
   // Body with wheel wells pushed in.
   const deform = (x: number, y: number, z: number): number => {
     let k = 1;
     for (const wi of wells) {
-      const r = Math.hypot(z - wheelZ[wi], y - wheelR[wi]);
+      const r = archDist(z - wheelZ[wi], y - wheelR[wi]);
       const inWell = 1 - THREE.MathUtils.smoothstep(r, archRs[wi] - 0.05, archRs[wi]);
       k = Math.min(k, 1 - inWell * 0.38);
     }
     // Only the sides are pushed, not the centre of the floor.
     return Math.abs(x) > hwm * 0.45 ? x * k : x;
   };
-  const bodyGeo = loft(style.body, { length: L, halfWidth: hwm, exp: style.bodyExp, tumble: style.bodyTumble, along: 60, around: style.around ?? 40, deform, sections: true });
+  const bodyGeo = loft(style.body, { length: L, halfWidth: hwm, exp: style.bodyExp, tumble: style.bodyTumble, along: 120, around: style.around ?? 72, deform, sections: true });
   // Vertex colours: paint everywhere, near-black inside the wheel wells.
   const bp = bodyGeo.getAttribute('position');
   const colors = new Float32Array(bp.count * 3);
@@ -621,7 +643,7 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
     let c = 1;
     if (Math.abs(x) > hwm * 0.45) {
       for (const wi of wells) {
-        const r = Math.hypot(z - wheelZ[wi], y - wheelR[wi]);
+        const r = archDist(z - wheelZ[wi], y - wheelR[wi]);
         c = Math.min(c, 0.03 + 0.97 * THREE.MathUtils.smoothstep(r, archRs[wi] - 0.06, archRs[wi] - 0.01));
       }
     }
@@ -635,18 +657,18 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
   const archT = (archR + 0.04) / L;
   const doorF = Math.max(c0 + 0.05, style.wheelT[0] + archT + 0.02);
   const doorR = Math.min(c0 + (c1 - c0) * 0.62, style.wheelT[1] - archT - 0.03);
-  applyBodyDetail(bodyPaint, [c0 - 0.01, doorF, doorR, c1 < 0.95 ? c1 + 0.015 : 2], L, hwm, tier === 'free' ? 0.18 : 0.3, style.facet ?? 0.4);
+  applyBodyDetail(bodyPaint, [c0 - 0.01, doorF, doorR, c1 < 0.95 ? c1 + 0.015 : 2], L, hwm, tier === 'free' ? 0.18 : 0.3, style.facet ?? 0.22);
   const body = new THREE.Mesh(bodyGeo, bodyPaint);
   car.add(body);
 
   const lowPoly = (style.around ?? 40) < 16;
   const cabinGlass = lowPoly ? Object.assign(glass.clone(), { flatShading: true }) : glass;
-  const cabin = new THREE.Mesh(loft(style.cabin, { length: L, halfWidth: hwm, exp: style.cabinExp, tumble: style.cabinTumble, along: lowPoly ? 8 : 40, around: lowPoly ? 8 : 40 }), cabinGlass);
+  const cabin = new THREE.Mesh(loft(style.cabin, { length: L, halfWidth: hwm, exp: style.cabinExp, tumble: style.cabinTumble, along: lowPoly ? 8 : 72, around: lowPoly ? 8 : 64 }), cabinGlass);
   cabin.name = 'cabin';
   car.add(cabin);
 
   // Wheel-well liners (dark arch lips).
-  for (const wi of wells) {
+  for (const wi of archP > 2.5 ? [] : wells) {
     for (const side of [-1, 1]) {
       const lip = new THREE.Mesh(new THREE.TorusGeometry(archRs[wi] - 0.02, 0.03, 6, 20, Math.PI).rotateY(Math.PI / 2), trim);
       lip.position.set(side * (hwm * 0.97), wheelR[wi], wheelZ[wi]);
@@ -976,13 +998,61 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
       fin.position.set(0, st(t0 + 0.05).top - 0.04, -L / 2 + t0 * L);
       car.add(fin);
     }
+    if (feat.has('vinylRoof')) {
+      // Matte vinyl over the roof and C-pillars (a 70s/80s classic): a dark slab on top of the greenhouse.
+      const cb = style.cabin;
+      const t0 = cb[1][0], t1 = cb[cb.length - 2][0];
+      const top = Math.min(cb[1][1], cb[cb.length - 2][1]);
+      const vinyl = new THREE.MeshStandardMaterial({ color: '#1c1418', roughness: 0.9, metalness: 0 });
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(W * cb[1][3] * 0.86, 0.04, (t1 - t0) * L * 1.02), vinyl);
+      roof.position.set(0, top + 0.005, -L / 2 + ((t0 + t1) / 2) * L);
+      car.add(roof);
+      for (const side of [-1, 1]) {
+        const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.03, top - cb[cb.length - 1][2] - 0.02, 0.32), vinyl);
+        pillar.position.set(side * (W / 2) * cb[cb.length - 2][3] * 0.96, (top + cb[cb.length - 1][2]) / 2, -L / 2 + t1 * L - 0.1);
+        car.add(pillar);
+      }
+    }
+    if (feat.has('chromeTrim')) {
+      // Bright chrome strip along the flanks, just above the sills.
+      for (const side of [-1, 1]) {
+        const pts: THREE.Vector3[] = [];
+        for (let i = 0; i <= 30; i++) {
+          const [x, y, z] = bodySurface(style, hwm, 0.06 + (0.88 * i) / 30, -0.35);
+          pts.push(new THREE.Vector3(side * (x + 0.008), y, z));
+        }
+        car.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 60, 0.014, 5), chrome));
+      }
+    }
+    if (feat.has('louvers')) {
+      // Slatted engine cover behind the canopy.
+      const t0 = style.cabin[style.cabin.length - 1][0] + 0.02;
+      for (let i = 0; i < 7; i++) {
+        const t = t0 + (i / 7) * (0.95 - t0);
+        const f = st(t);
+        const slat = new THREE.Mesh(new THREE.BoxGeometry(W * f.hw * 0.62, 0.035, 0.07), trim);
+        slat.position.set(0, f.top + 0.02, -L / 2 + t * L);
+        slat.rotation.x = -0.35;
+        car.add(slat);
+      }
+    }
+    if (feat.has('tailFins')) {
+      const rr = st(1);
+      for (const side of [-1, 1]) {
+        const finShape = new THREE.Shape();
+        finShape.moveTo(0, 0); finShape.lineTo(1.0, 0); finShape.lineTo(1.0, 0.42); finShape.lineTo(0.3, 0.06); finShape.lineTo(0, 0);
+        const f = new THREE.Mesh(new THREE.ExtrudeGeometry(finShape, { depth: 0.03, bevelEnabled: false }).rotateY(-Math.PI / 2), paint);
+        f.position.set(side * (hwm * rr.hw * 0.86) + 0.015, rr.top - 0.04, L / 2 - 1.0);
+        car.add(f);
+      }
+    }
     if (feat.has('fenderPods')) {
       // Separate rounded pods over the wheels, standing proud of the narrow central tub.
-      const pod = new THREE.SphereGeometry(1, 20, 12);
+      const pod = new THREE.BoxGeometry(2, 2, 2);
       for (let wi = 0; wi < 2; wi++) {
         for (const side of [-1, 1]) {
           const m = new THREE.Mesh(pod, paint);
-          m.scale.set(0.26, wheelR[wi] * 0.7, archRs[wi] * 1.25);
+          m.scale.set(0.2, wheelR[wi] * 0.5, archRs[wi] * 1.15);
           m.position.set(side * (hwm - 0.26), wheelR[wi] + 0.06, wheelZ[wi]);
           car.add(m);
         }

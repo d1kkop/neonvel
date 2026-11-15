@@ -422,9 +422,9 @@ export class Road {
     const frame = makeFrame();
     const m = new THREE.Matrix4();
     const back = new THREE.Vector3();
-    const top = track.height - ROAD_STYLE.deckDepth;
     for (let i = 0; i < count; i++) {
       track.frameAt(i * spacing, frame);
+      const top = frame.position.y - ROAD_STYLE.deckDepth; // follows hills
       back.copy(frame.forward).negate();
       // column
       m.makeBasis(frame.right, frame.up, back).scale(new THREE.Vector3(4, top - 0.4, 3));

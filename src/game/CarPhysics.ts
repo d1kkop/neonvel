@@ -185,7 +185,11 @@ export function stepPhys(c: CarPhys, inp: InputState & { handbrake?: number; boo
   c.x += c.v * Math.sin(c.phi) * dt;
 
   // --- Walls
-  const limit = track.width / 2 - spec.halfWidth - 0.25;
+  // The body is turned on the track (heading + drift angle): its corner sticks out further than the plain
+  // half width, so the wall stop uses the rotated footprint (otherwise the tail swings through the wall).
+  const yawOnTrack = Math.min(0.9, Math.abs(c.psi + c.driftAngle));
+  const extent = spec.halfWidth * Math.cos(yawOnTrack) + (spec.length / 2) * Math.sin(yawOnTrack) * 0.85;
+  const limit = track.width / 2 - Math.max(spec.halfWidth, extent) - 0.25;
   const wasOnWall = c.onWall;
   c.onWall = false;
   if (Math.abs(c.x) > limit) {

@@ -89,7 +89,11 @@ export class App {
       quitToMenu: () => this.toMenu(),
       mainShown: () => {
         // The main menu always shows the first level (and its theme tune), whatever was previewed.
-        if (this.state === 'menu') this.previewLevel(levelById(MENU_LEVEL), true);
+        if (this.state === 'menu') {
+          this.previewLevel(levelById(MENU_LEVEL), true);
+          // Back on the title: the theme again (also when the background didn't need a rebuild).
+          if (!this.onTitle) { this.onTitle = true; this.applyMusic(); }
+        }
       },
       settingsChanged: () => this.applySettings(),
       previewLevel: (l) => this.previewLevel(l),
@@ -234,6 +238,7 @@ export class App {
   }
 
   private loadMenuWorld(level: LevelDef, title = false): void {
+    this.onTitle = title;
     const weather = title ? level.defaultWeather : this.raceWeather(level);
     this.menuWeather = `${weather}|${!title && this.raceFog(level)}`;
     const w = this.buildWorld(level, weather, 3);
@@ -265,6 +270,7 @@ export class App {
   }
 
   private startRace(): void {
+    this.onTitle = false;
     window.clearTimeout(this.previewTimer);
     if (!this.isLevelOwned(this.settings.levelId)) {
       this.menu.toast('This level is locked — unlock it on the Quick Race screen.');
@@ -678,7 +684,16 @@ export class App {
   private lastMusicPick = '';
 
   /** Level track unless the player picked a fixed track or shuffle. `levelChanged` re-rolls shuffle. */
+  /** True while the title screen's own background is showing (it always plays the theme). */
+  private onTitle = false;
+
   private applyMusic(levelChanged = false): void {
+    if (this.onTitle) {
+      // The game always opens with its theme, whatever the music setting.
+      window.clearInterval(this.shuffleTimer);
+      this.audio.playMusic('space-city');
+      return;
+    }
     const pick = this.settings.music;
     const switchedToShuffle = pick === 'shuffle' && this.lastMusicPick !== 'shuffle';
     this.lastMusicPick = pick;
@@ -751,6 +766,7 @@ export class App {
 
   /** Server found a match: load the level with every driver on the grid, then report ready. */
   private startOnline(m: Extract<ServerMsg, { t: 'match' }>): void {
+    this.onTitle = false;
     const level = levelById(m.levelId);
     this.online = { matchId: m.matchId, you: m.you, players: m.players, laps: m.laps, finishedSent: false };
     this.lastWasOnline = true;

@@ -174,17 +174,17 @@ export function createPalms(
           float fibre = 0.9 + 0.1 * sin(vUv.x * 80.0 + vUv.y * 13.0);
           col = uTrunk * (0.7 + 0.4 * ring) * fibre * mix(0.75, 1.05, vUv.y);
         } else if (vPart < 1.5) {
-          // Leaflets: a fine comb of narrow blades along the rib.
+          // Solid leaf (no see-through gaps): only the outer edge is lightly serrated where the leaflet
+          // tips end; the leaflets themselves are drawn as shading lines across the surface.
           float across = abs(vUv.x - 0.5) * 2.0;
           float cc = vUv.y * 46.0 + across * 2.2;
           float fw = max(fwidth(cc), 1e-4);
-          // Leaflet coverage with an anti-aliased edge; far away it blends to ~55% coverage.
-          float blade = 1.0 - smoothstep(0.55 - fw, 0.55 + fw, fract(cc));
-          blade = mix(blade, 0.6, smoothstep(0.35, 0.9, fw));
-          if (across <= 0.08) blade = 1.0;
+          float lines = smoothstep(0.0, 0.5 + fw, abs(fract(cc) - 0.5) * 2.0);
+          lines = mix(lines, 0.5, smoothstep(0.35, 0.9, fw)); // fade the lines out far away
           float fwe = max(fwidth(across), 1e-4);
-          float edge = 1.0 - smoothstep(1.0 - vUv.y * 0.35 - fwe, 1.0 - vUv.y * 0.35 + fwe, across);
-          alpha = blade * edge;
+          float limit = 1.0 - vUv.y * 0.35 - 0.1 * fract(cc) * smoothstep(0.35, 0.9, across) * (1.0 - smoothstep(0.35, 0.9, fw));
+          float edge = 1.0 - smoothstep(limit - fwe, limit + fwe, across);
+          alpha = edge;
           #ifdef HARD_CUTOUT
             if (alpha < 0.5) discard;
             alpha = 1.0;
@@ -193,6 +193,7 @@ export function createPalms(
           #endif
           col = mix(uFrond, uTip, vUv.y * 0.75 + across * 0.25);
           col *= 0.8 + 0.25 * (1.0 - across);
+          col *= 0.82 + 0.18 * lines; // leaflet lines
           if (across < 0.08) col *= 0.75; // darker rib
         } else {
           col = vec3(0.32, 0.22, 0.1);
