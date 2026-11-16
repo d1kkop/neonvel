@@ -130,6 +130,14 @@ export interface TrackInfo {
   title: string;
   source: 'file' | 'synth';
   file?: string;
+  /** Tempo of a recorded track (manifest "bpm", or "bpm115" in the file name). */
+  bpm?: number;
+}
+
+/** Where the beat is: fractional beat count at a given AudioContext time. */
+export interface BeatClock {
+  bpm: number;
+  beatAt(now: number): number;
 }
 
 export class Music {
@@ -137,7 +145,7 @@ export class Music {
   private buffers = new Map<string, AudioBuffer>();
   private loaded: Promise<void> | null = null;
   private currentId = '';
-  private player: { stop(): void } | null = null;
+  private player: ({ stop(): void } & Partial<BeatClock>) | null = null;
   private wanted = '';
   /** Called whenever the playing music changes (title). */
   onChange?: (title: string) => void;
@@ -165,12 +173,13 @@ export class Music {
           const base = import.meta.env.BASE_URL;
           const res = await fetch(`${base}audio/manifest.json`);
           if (!res.ok) return;
-          const manifest = (await res.json()) as { music?: (string | { file: string; title?: string; id?: string })[] };
+          const manifest = (await res.json()) as { music?: (string | { file: string; title?: string; id?: string; bpm?: number })[] };
           for (const entry of manifest.music ?? []) {
             const file = typeof entry === 'string' ? entry : entry.file;
             const title = typeof entry === 'string' ? file.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ') : entry.title ?? file;
             const id = (typeof entry === 'string' ? undefined : entry.id) ?? file.replace(/\.[a-z0-9]+$/i, '');
-            this.fileTracks.push({ id, title, source: 'file', file });
+            const bpm = (typeof entry === 'string' ? undefined : entry.bpm) ?? Number(/bpm(\d+)/i.exec(file)?.[1] ?? 0);
+            this.fileTracks.push({ id, title, source: 'file', file, bpm: bpm || undefined });
           }
         } catch {
           /* no manifest: procedural songs only */
@@ -204,11 +213,17 @@ export class Music {
     this.currentId = track.id;
     const anthem = ANTHEMS.find((s) => s.id === track.id);
     this.player = buffer
-      ? new FilePlayer(this.ctx, this.out, buffer)
+      ? new FilePlayer(this.ctx, this.out, buffer, track.bpm)
       : anthem
         ? new AnthemPlayer(this.ctx, this.out, anthem)
         : new SongPlayer(this.ctx, this.out, SONGS.find((s) => s.id === track.id) ?? SONGS[0]);
     this.onChange?.(track.title);
+  }
+
+  /** The playing track's beat clock (null when its tempo is unknown). */
+  get beat(): BeatClock | null {
+    const p = this.player;
+    return p && p.bpm && p.beatAt ? (p as BeatClock) : null;
   }
 
   /** N key: next track in the list. */
@@ -231,12 +246,18 @@ export class Music {
 class FilePlayer {
   private readonly src: AudioBufferSourceNode;
   private readonly gain: GainNode;
-  constructor(private readonly ctx: AudioContext, out: AudioNode, buffer: AudioBuffer) {
+  private readonly t0: number;
+  private readonly offset: number;
+  private readonly duration: number;
+  constructor(private readonly ctx: AudioContext, out: AudioNode, buffer: AudioBuffer, readonly bpm?: number) {
     this.src = ctx.createBufferSource();
     this.src.buffer = buffer;
     this.src.loop = true;
     this.gain = ctx.createGain();
     const t = ctx.currentTime;
+    this.t0 = t;
+    this.duration = buffer.duration;
+    this.offset = bpm ? beatOffset(buffer, bpm) : 0;
     this.gain.gain.setValueAtTime(0, t);
     this.gain.gain.linearRampToValueAtTime(0.7, t + 1.5);
     this.src.connect(this.gain).connect(out);
@@ -248,6 +269,37 @@ class FilePlayer {
     this.gain.gain.setTargetAtTime(0, t, 0.4);
     this.src.stop(t + 2);
   }
+  beatAt(now: number): number {
+    const local = (now - this.t0) % this.duration; // the file loops
+    return ((local - this.offset) * (this.bpm ?? 120)) / 60;
+  }
+}
+
+const offsetCache = new WeakMap<AudioBuffer, number>();
+/**
+ * Where the first beat falls in a recorded track: fold the low-frequency energy envelope of the first
+ * ~40 s onto one beat period and take the strongest phase (the kick drum).
+ */
+function beatOffset(buffer: AudioBuffer, bpm: number): number {
+  const cached = offsetCache.get(buffer);
+  if (cached !== undefined) return cached;
+  const sr = buffer.sampleRate;
+  const d = buffer.getChannelData(0);
+  const period = (60 / bpm) * sr;
+  const bins = 64;
+  const acc = new Float32Array(bins);
+  let lp = 0;
+  const end = Math.min(d.length, sr * 40);
+  for (let i = 0; i < end; i++) {
+    lp += (d[i] - lp) * 0.02; // ~150 Hz low-pass: kick drum energy
+    const b = Math.floor(((i % period) / period) * bins);
+    acc[b] += lp * lp;
+  }
+  let best = 0;
+  for (let b = 1; b < bins; b++) if (acc[b] > acc[best]) best = b;
+  const off = (best / bins) * (60 / bpm);
+  offsetCache.set(buffer, off);
+  return off;
 }
 
 /**
@@ -255,6 +307,9 @@ class FilePlayer {
  * bass, gated pad, lead arpeggio, kick / snare / hats — all driven by a SongDef.
  */
 class SongPlayer {
+  private origin = 0;
+  get bpm(): number { return this.song.bpm; }
+  beatAt(now: number): number { return ((now - this.origin) * this.song.bpm) / 60; }
   private readonly bus: GainNode;
   private readonly delaySend: GainNode;
   private readonly reverbSend: GainNode;
@@ -285,6 +340,7 @@ class SongPlayer {
     this.bus.gain.setValueAtTime(0, t);
     this.bus.gain.linearRampToValueAtTime(0.85, t + 1.5);
     this.nextTime = t + 0.1;
+    this.origin = this.nextTime;
     this.timer = window.setInterval(() => this.schedule(), 25);
   }
 

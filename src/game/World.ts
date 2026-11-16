@@ -15,7 +15,7 @@ import { Weather, WeatherName } from '../world/weather/Weather';
 import type { InputState } from '../app/Input';
 import type { NetCarState } from '../net/NetClient';
 import { buildCar, BuiltCar, setCarFogGlow } from './car/CarBuilder';
-import { CARS, specFromStats } from './car/catalog';
+import { CARS, specFor } from './car/catalog';
 import { AI_DIFFICULTY, AiDifficulty, AiDriver, aiInput, boostFromHit, CarPhys, CarSpec, collidePhys, createPhys, DEFAULT_SPEC, stepPhys } from './CarPhysics';
 
 export type Quality = 'low' | 'medium' | 'high';
@@ -42,12 +42,27 @@ export interface CarEntry {
   left?: boolean;
   visRoll?: number;
   visPitch?: number;
+  /** Non-racing cars (game modes): traffic drives its lane, police uses `brain`. */
+  kind?: 'traffic' | 'police';
+  /** Traffic: lane offset and cruising speed (m/s). */
+  lane?: number;
+  cruise?: number;
+  /** Police / scripted drivers: input each step. */
+  brain?: (c: CarEntry, dt: number) => InputState & { handbrake?: number; boost?: number };
+}
+
+/** A car-to-NPC contact this step (for the game modes: crashes into traffic, police rams). */
+export interface NpcHit {
+  npc: CarEntry;
+  car: CarEntry;
+  strength: number;
 }
 
 /** Events from one simulation step that the game wants to react to (sounds, shake). */
 export interface StepEvents {
   playerWall: number;
   playerHit: number;
+  npcHits: NpcHit[];
 }
 
 export interface CarSetup {
@@ -56,20 +71,30 @@ export interface CarSetup {
   accent: string;
   driftMode?: boolean;
   /** Physics overrides from the car's stats. */
-  spec?: { topSpeed: number; accel: number; grip: number };
+  spec?: { topSpeed: number; accel: number; grip: number; brake?: number; wheelbase?: number; maxSteer?: number };
   name?: string;
   tier?: 'free' | 'pro' | 'elite';
 }
 
-const DRIVER_NAMES = ['VIPER', 'NOVA', 'GHOST', 'BLAZE', 'JADE', 'RAVEN', 'ZED'];
+const DRIVER_NAMES = ['VIPER', 'NOVA', 'GHOST', 'BLAZE', 'JADE', 'RAVEN', 'ZED', 'ACE', 'LUNA', 'ROCCO'];
+/** Second livery for a model that appears twice on a big grid. */
+const ALT_PAINTS = ['#ff3b5c', '#3dff9e', '#ffe14a', '#8a7bff', '#00e5ff', '#ff8a20', '#f0f0f0'];
 
 /** AI opponents drive the free garage cars (never the player's model). */
+const BUS_PAINTS = ['#e04040', '#2a7ae0', '#30c070', '#f0f0f0', '#9040e0', '#ff8a20', '#20c8d8'];
+
 function opponentSetups(playerStyle: string): (CarSetup & { name: string })[] {
-  // AI drives the whole line-up (so races stay competitive against unlocked cars).
-  const pool = CARS.filter((c) => c.style !== playerStyle);
+  // Bus race: everyone gets a bus, in different liveries.
+  if (playerStyle === 'bus') {
+    const bus = CARS.find((c) => c.class === 'bus')!;
+    return DRIVER_NAMES.map((name, i) => ({ name, style: bus.style, paint: BUS_PAINTS[i % BUS_PAINTS.length], accent: bus.accent, spec: specFor(bus), tier: bus.tier }));
+  }
+  // AI drives the whole car line-up (so races stay competitive against unlocked cars).
+  const pool = CARS.filter((c) => c.style !== playerStyle && c.class !== 'bus');
   return DRIVER_NAMES.map((name, i) => {
     const m = pool[i % pool.length];
-    return { name, style: m.style, paint: m.paint, accent: m.accent, spec: specFromStats(m.stats), tier: m.tier };
+    const paint = i < pool.length ? m.paint : ALT_PAINTS[i % ALT_PAINTS.length];
+    return { name, style: m.style, paint, accent: m.accent, spec: specFor(m), tier: m.tier };
   });
 }
 
@@ -91,6 +116,8 @@ export class World {
   private readonly envTarget: THREE.WebGLRenderTarget;
   private readonly tireFx = new TireFX();
   private groundMist!: GroundMist;
+  /** 0..1, set by the app every frame from the music's beat clock. */
+  beatPulse = 0;
   private boostFx!: BoostFX;
   private readonly frame = makeFrame();
   private readonly basis = new THREE.Matrix4();
@@ -163,7 +190,8 @@ export class World {
       },
       sound: (kind) => this.onLevelSound?.(kind),
     });
-    const billboards = new Billboards(this.track, built.roofSpots ?? [], built.faceSpots ?? [], L.seed, L.billboards);
+    const billboards = new Billboards(this.track, built.roofSpots ?? [], built.faceSpots ?? [], L.seed, L.billboards, L.billboardStyle ?? 'neon');
+    if (billboards.update) this.updaters.push((t) => billboards.update!(t));
     this.scene.add(billboards.group);
 
     // --- Weather & beams
@@ -184,7 +212,12 @@ export class World {
     type Slot = { setup: CarSetup & { name?: string }; slot: number; netId?: string; remote?: boolean; name?: string };
     const slots: Slot[] = online
       ? online.map((p, i) => ({ setup: p.setup, slot: i, netId: p.id, remote: !p.local, name: p.name })).sort((a, b) => Number(!!a.remote) - Number(!!b.remote))
-      : [playerCar, ...opponentSetups(playerCar.style).slice(0, opponents)].map((setup, i) => ({ setup, slot: i }));
+      : (() => {
+          // The player starts mid-grid (not on pole): AI cars fill the slots ahead and behind.
+          const opp = opponentSetups(playerCar.style).slice(0, opponents);
+          const mid = Math.floor((opp.length + 1) / 2);
+          return [playerCar, ...opp].map((setup, i) => ({ setup, slot: i === 0 ? mid : i <= mid ? i - 1 : i }));
+        })();
     slots.forEach(({ setup, slot, netId, remote, name: netName }, i) => {
       const car = buildCar({ style: setup.style, paint: setup.paint, accent: setup.accent, tier: setup.tier });
       car.group.add(createHeadlightBeams(car.style.width, 24, -car.style.length / 2, 0.55, L.time === 'day' ? 0.35 : L.time === 'dusk' ? 0.7 : L.id === 'orbit-run' ? 0.4 : 1)); // space: dark road + strong bloom made them glare
@@ -235,7 +268,7 @@ export class World {
    * `frozen` holds every car on the grid (countdown).
    */
   step(dt: number, playerInput: (InputState & { handbrake?: number }) | null, frozen = false): StepEvents {
-    const ev: StepEvents = { playerWall: 0, playerHit: 0 };
+    const ev: StepEvents = { playerWall: 0, playerHit: 0, npcHits: [] };
     const phys = this.cars.map((c) => c.phys);
     this.updateRemotes();
     for (const c of this.cars) {
@@ -272,7 +305,76 @@ export class World {
         }
       }
     }
+    if (!frozen && this.npcs.length) this.stepNpcs(dt, ev);
     return ev;
+  }
+
+  // ------------------------------------------------------------- game-mode cars (traffic, police)
+
+  /** Traffic and police: not part of the race standings, but driven, collided and drawn like the others. */
+  readonly npcs: CarEntry[] = [];
+
+  addNpc(o: { setup: CarSetup; s: number; x: number; kind: 'traffic' | 'police'; cruise?: number; brain?: CarEntry['brain'] }): CarEntry {
+    const car = buildCar({ style: o.setup.style, paint: o.setup.paint, accent: o.setup.accent, tier: o.setup.tier });
+    car.group.add(createHeadlightBeams(car.style.width, 18, -car.style.length / 2, 0.55, this.level.time === 'day' ? 0.25 : 0.6));
+    for (const w of car.wheels) w.rotation.order = 'YXZ';
+    this.scene.add(car.group);
+    const spec: CarSpec = { ...DEFAULT_SPEC, ...(o.setup.spec ?? {}), length: car.style.length, halfWidth: car.style.width / 2 };
+    const phys = createPhys(o.s, o.x);
+    phys.v = o.cruise ?? 0;
+    phys.boost = 0;
+    const e: CarEntry = { car, name: o.kind, phys, spec, ai: null, isPlayer: false, input: { throttle: 0, brake: 0, steer: 0 }, kind: o.kind, lane: o.x, cruise: o.cruise, brain: o.brain };
+    this.npcs.push(e);
+    return e;
+  }
+
+  removeNpc(e: CarEntry): void {
+    const i = this.npcs.indexOf(e);
+    if (i < 0) return;
+    this.npcs.splice(i, 1);
+    this.scene.remove(e.car.group);
+    e.car.group.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+  }
+
+  private stepNpcs(dt: number, ev: StepEvents): void {
+    const all = this.cars.map((c) => c.phys).concat(this.npcs.map((n) => n.phys));
+    for (const n of this.npcs) {
+      const p = n.phys;
+      if (n.brain) {
+        n.input = n.brain(n, dt);
+        stepPhys(p, n.input, n.spec, this.track, dt);
+        continue;
+      }
+      // Traffic: holds its lane and cruising speed (recovers after being knocked about).
+      p.ps = p.s; p.px = p.x; p.ppsi = p.psi;
+      const target = n.cruise ?? 25;
+      p.v += (target - p.v) * Math.min(1, dt * 0.6);
+      p.s += p.v * dt;
+      p.x += ((n.lane ?? 0) - p.x) * Math.min(1, dt * 1.2);
+      p.psi *= Math.exp(-dt * 3);
+      p.phi = p.psi;
+      p.drift = 0;
+      n.input = { throttle: 0.4, brake: p.v > target + 2 ? 0.6 : 0, steer: 0 };
+      void all;
+    }
+    const wallLimit = this.track.width / 2 - 1.2;
+    for (const n of this.npcs) {
+      for (const c of this.cars) {
+        if (c.left || c.remote) continue;
+        const hit = collidePhys(c.phys, n.phys, c.spec, this.track.length, wallLimit);
+        if (hit > 0) {
+          ev.npcHits.push({ npc: n, car: c, strength: hit });
+          if (c.isPlayer) ev.playerHit = Math.max(ev.playerHit, hit);
+        }
+      }
+    }
+    // Police vs traffic (they bump through it).
+    for (let i = 0; i < this.npcs.length; i++) {
+      for (let j = i + 1; j < this.npcs.length; j++) {
+        if (this.npcs[i].kind === 'traffic' && this.npcs[j].kind === 'traffic') continue;
+        collidePhys(this.npcs[i].phys, this.npcs[j].phys, this.npcs[i].spec, this.track.length, wallLimit);
+      }
+    }
   }
 
   /** Store a network snapshot for a remote car. */
@@ -325,11 +427,12 @@ export class World {
 
   /** Interpolated placement of all cars, with body roll / pitch and steered front wheels. */
   placeCars(alpha: number): void {
-    for (const c of this.cars) {
+    for (const c of this.npcs.length ? this.cars.concat(this.npcs) : this.cars) {
       const p = c.phys;
       const s = p.ps + (p.s - p.ps) * alpha;
       const x = p.px + (p.x - p.px) * alpha;
-      const psi = p.ppsi + (p.psi - p.ppsi) * alpha + p.driftAngle;
+      const psiTravel = p.ppsi + (p.psi - p.ppsi) * alpha;
+      const psi = psiTravel + p.driftAngle;
       this.track.frameAt(s, this.frame);
       const g = c.car.group;
       g.position.copy(this.frame.position).addScaledVector(this.frame.right, x);
@@ -343,6 +446,14 @@ export class World {
       this.back.copy(this.fwd).negate();
       this.basis.makeBasis(this.side, this.up, this.back);
       g.quaternion.setFromRotationMatrix(this.basis);
+      // Drift swing pivots near the front axle: the tail swings out instead of the car spinning on its middle.
+      if (Math.abs(p.driftAngle) > 0.005) {
+        const a = c.car.style.length * 0.28;
+        const f0x = this.frame.forward.x * Math.cos(psiTravel) + this.frame.right.x * Math.sin(psiTravel);
+        const f0z = this.frame.forward.z * Math.cos(psiTravel) + this.frame.right.z * Math.sin(psiTravel);
+        g.position.x += (f0x - this.fwd.x) * a;
+        g.position.z += (f0z - this.fwd.z) * a;
+      }
       // Subtle, spring-damped roll into corners and pitch under acceleration / braking.
       const tr = THREE.MathUtils.clamp(-p.latAcc * 0.0012, -0.025, 0.025);
       const tp = THREE.MathUtils.clamp(p.lonAcc * 0.0006, -0.012, 0.012);
@@ -388,14 +499,16 @@ export class World {
     const mist = this.weather.mist;
     this.groundMist.update(mist, this.cars[0]?.phys.s ?? 0);
     const bloom = this.level.lighting.bloom;
-    this.renderer.bloom.strength = bloom.strength * (1 + mist * 1.1);
+    this.renderer.bloom.strength = bloom.strength * (1 + mist * 1.1) * (1 + 0.18 * this.beatPulse);
+    this.road.setBeatPulse(this.beatPulse);
     this.renderer.bloom.radius = Math.min(1, bloom.radius + mist * 0.45);
     setCarFogGlow(mist * (this.level.time === 'day' ? 0.35 : 1));
     this.tireFx.setViewportHeight(this.renderer.webgl.domElement.height);
     // Snow levels throw powder even when it is not snowing; underwater always bubbles.
     const fxPrecip = this.level.precipitation === 'snow' || this.level.precipitation === 'bubbles' ? this.level.precipitation : this.weather.precipAmount > 0.1 ? 'rain' : 'none';
-    this.tireFx.update(dt, this.cars, this.weather.roadWet, { precip: fxPrecip, mist });
-    this.boostFx.update(dt, this.cars, mist);
+    const fxCars = this.npcs.length ? this.cars.concat(this.npcs) : this.cars;
+    this.tireFx.update(dt, fxCars, this.weather.roadWet, { precip: fxPrecip, mist });
+    this.boostFx.update(dt, fxCars, mist);
     this.searchlights?.update(this.time);
     for (const fn of this.updaters) fn(this.time, dt);
   }

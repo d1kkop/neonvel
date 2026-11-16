@@ -195,3 +195,20 @@ table.lb tr.me td { color: var(--yellow); }
 .hud-laptime .hud-small { font-size: 11px; display: inline-block; width: 42px; }
 .minimap { position: absolute; left: 16px; bottom: 16px; width: 170px; height: 170px; pointer-events: none; }
 @media (pointer: coarse) { .minimap { left: auto; right: 16px; bottom: auto; top: 76px; width: 130px; height: 130px; } }
+
+/* Drive to the beat */
+.beat-dot { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%; background: #ff2bd6; box-shadow: 0 0 10px #ff2bd6; vertical-align: middle; transition: background .05s; }
+.beat-dot.window { background: #fff; box-shadow: 0 0 14px #fff, 0 0 24px #00e5ff; }
+.beat-pop { position: absolute; top: 30%; left: 0; right: 0; text-align: center; font-size: 30px; font-weight: 900; font-style: italic; letter-spacing: .06em;
+  color: #fff; text-shadow: 0 0 12px #00e5ff, 0 0 26px #ff2bd6; opacity: 0; pointer-events: none; }
+.beat-pop.miss { font-size: 18px; color: rgba(255, 255, 255, .7); text-shadow: none; }
+.beat-pop.show { animation: beatPop .9s ease-out forwards; }
+@keyframes beatPop { 0% { opacity: 0; transform: scale(1.5); } 15% { opacity: 1; transform: scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translateY(-14px); } }
+
+/* Game modes */
+.hud-mode { font-size: 22px; font-weight: 900; font-style: italic; line-height: 1.35; text-shadow: 0 0 8px var(--pink); }
+.hud-mode div:first-child { font-size: 26px; color: var(--yellow); }
+
+/* VCR on-screen display */
+.vcr-osd { position: absolute; left: 50%; top: 20%; transform: translateX(-50%); font-family: 'Courier New', monospace; font-size: 30px; font-weight: 700;
+  color: #f4f4f4; letter-spacing: .12em; text-shadow: 2px 0 rgba(255, 0, 60, .7), -2px 0 rgba(0, 200, 255, .7); opacity: 0; transition: opacity .2s; pointer-events: none; }

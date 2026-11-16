@@ -17,21 +17,38 @@ export interface CarModel {
   /** Visual / marketing tier. */
   tier: 'free' | 'pro' | 'elite';
   blurb: string;
+  /** Vehicle class: buses only race buses (also online). */
+  class?: 'car' | 'bus';
+  /** Physics overrides on top of the stat-derived spec (e.g. the heavy bus). */
+  specOverride?: { topSpeed?: number; accel?: number; brake?: number; grip?: number; wheelbase?: number; maxSteer?: number };
 }
 
 export const CARS: CarModel[] = [
   // Free starters: deliberately mediocre.
   { id: 'vortex', name: 'Vortex GT-R', style: 'wedge', paint: '#c8ff00', accent: '#00e5ff', stats: { speed: 5, accel: 5, grip: 5 }, engine: 'flat12', price: 0, tier: 'free', blurb: 'Your first wedge. Honest, balanced — and outgunned by everything you can unlock.' },
   { id: 'thunder', name: 'Thunder 454', style: 'muscle', paint: '#1a6bff', accent: '#ff2bd6', stats: { speed: 5, accel: 6, grip: 4 }, engine: 'v8muscle', price: 0, tier: 'free', blurb: 'Old-school muscle. Loud and quick off the line, but wallows in the bends.' },
-  // PRO ($2): clearly better.
-  { id: 'velvet', name: 'Velvet Coupé', style: 'coupe', paint: '#ff2bd6', accent: '#ffb000', stats: { speed: 7, accel: 7, grip: 8 }, engine: 'inline6', price: 200, tier: 'pro', blurb: 'Smooth and sticky — corners like it is on rails.' },
-  { id: 'pocket', name: 'Pocket Rocket', style: 'hatch', paint: '#ffb000', accent: '#3dff9e', stats: { speed: 6, accel: 9, grip: 8 }, engine: 'turbo4', price: 200, tier: 'pro', blurb: 'Turbo hot hatch. Explodes out of every corner.' },
-  { id: 'cruiser', name: 'Midnight Cruiser', style: 'gt', paint: '#2a2a3a', accent: '#a64dff', stats: { speed: 9, accel: 6, grip: 7 }, engine: 'v12', price: 200, tier: 'pro', blurb: 'V12 grand tourer with a huge top speed.' },
+  // Free as well (only the last three cars are locked).
+  { id: 'velvet', name: 'Velvet Coupé', style: 'coupe', paint: '#ff2bd6', accent: '#ffb000', stats: { speed: 7, accel: 7, grip: 8 }, engine: 'inline6', price: 0, tier: 'pro', blurb: 'Smooth and sticky — corners like it is on rails.' },
+  { id: 'pocket', name: 'Pocket Rocket', style: 'hatch', paint: '#ffb000', accent: '#3dff9e', stats: { speed: 6, accel: 9, grip: 8 }, engine: 'turbo4', price: 0, tier: 'pro', blurb: 'Turbo hot hatch. Explodes out of every corner.' },
+  { id: 'cruiser', name: 'Midnight Cruiser', style: 'gt', paint: '#2a2a3a', accent: '#a64dff', stats: { speed: 9, accel: 6, grip: 7 }, engine: 'v12', price: 0, tier: 'pro', blurb: 'V12 grand tourer with a huge top speed.' },
   { id: 'razor', name: 'Razor X', style: 'razor', paint: '#f5f5f5', accent: '#ff3b5c', stats: { speed: 8, accel: 8, grip: 7 }, engine: 'v10', price: 200, tier: 'pro', blurb: 'Knife-edge V10 hypercar wedge. Fast everywhere.' },
+  // The bus: its own class — drive it and everyone else is in a bus too (online as well).
+  { id: 'bus', name: 'Night Liner', style: 'bus', paint: '#e8b020', accent: '#ff2bd6', stats: { speed: 3, accel: 2, grip: 3 }, engine: 'v8muscle', price: 0, tier: 'free', class: 'bus',
+    specOverride: { topSpeed: 50, accel: 7, brake: 20, grip: 15, wheelbase: 6.2, maxSteer: 0.5 },
+    blurb: '11 metres of 80s city bus. Slow to get going, leans into every bend — and every other racer gets a bus too.' },
   // ELITE ($3): the best.
   { id: 'phantom', name: 'Phantom LM', style: 'proto', paint: '#0b0b12', accent: '#00e5ff', stats: { speed: 9, accel: 9, grip: 9 }, engine: 'racev8', price: 300, tier: 'elite', blurb: 'Le Mans prototype. Iridescent stealth paint, screaming race V8, near-perfect in every corner.' },
   { id: 'aurum', name: 'Aurum Hyper', style: 'hyper', paint: '#d4a017', accent: '#ff2bd6', stats: { speed: 10, accel: 9, grip: 8 }, engine: 'w16', price: 300, tier: 'elite', blurb: 'W16 quad-turbo in pearlescent gold. The fastest car in the game.' },
 ];
+
+/** Physics spec for a vehicle: stats mapped onto the spec, plus its own overrides (bus). */
+export function specFor(m: CarModel): { topSpeed: number; accel: number; grip: number; brake?: number; wheelbase?: number; maxSteer?: number } {
+  return { ...specFromStats(m.stats), ...(m.specOverride ?? {}) };
+}
+
+export function classOf(id: string): 'car' | 'bus' {
+  return CARS.find((c) => c.id === id)?.class ?? 'car';
+}
 
 export function carById(id: string): CarModel {
   return CARS.find((c) => c.id === id) ?? CARS[0];

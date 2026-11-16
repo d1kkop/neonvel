@@ -123,6 +123,8 @@ export interface LevelDef {
   /** Weather for races on this level until the player picks one (the title-screen background keeps defaultWeather). */
   firstWeather?: WeatherName;
   billboards: BillboardDesign[];
+  /** 'neon' roadside screens (default) or 'underwater' floating boards (buoys, chains, bubbles). */
+  billboardStyle?: 'neon' | 'underwater';
   ambience: AmbienceKind;
   /** Default music track id for this level. */
   music: string;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { carModelFor } from './carModels';
 
 /**
  * Procedural retro car generator.
@@ -132,7 +133,7 @@ export const CAR_STYLES: Record<string, CarStyle> = {
   proto: {
     name: 'proto',
     length: 4.8,
-    width: 2.0,
+    width: 2.04,
     body: [[0.0, 0.36, 0.18, 0.94], [0.05, 0.46, 0.15, 0.99], [0.2, 0.54, 0.14, 0.92], [0.38, 0.6, 0.14, 0.66], [0.62, 0.72, 0.14, 0.72], [0.8, 0.8, 0.16, 1.0], [1.0, 0.8, 0.26, 1.0]],
     bodyExp: 9,
     bodyTumble: 0.08,
@@ -150,7 +151,7 @@ export const CAR_STYLES: Record<string, CarStyle> = {
   hyper: {
     name: 'hyper',
     length: 4.6,
-    width: 2.04,
+    width: 2.1,
     body: [[0.0, 0.4, 0.2, 0.86], [0.06, 0.5, 0.17, 0.96], [0.22, 0.6, 0.16, 1.0], [0.45, 0.68, 0.16, 0.88], [0.75, 0.9, 0.18, 1.0], [0.94, 0.9, 0.2, 1.0], [1.0, 0.86, 0.3, 0.96]],
     bodyExp: 9,
     bodyTumble: 0.12,
@@ -164,11 +165,28 @@ export const CAR_STYLES: Record<string, CarStyle> = {
     archSquare: 3,
     features: ['fin', 'louvers'],
   },
+  /** 80s city bus: a long box with a glass band, big wheels. */
+  bus: {
+    name: 'bus',
+    length: 11,
+    width: 2.5,
+    body: [[0.0, 2.7, 0.45, 0.96], [0.012, 2.95, 0.42, 1.0], [0.985, 2.95, 0.42, 1.0], [1.0, 2.8, 0.45, 0.97]],
+    bodyExp: 18,
+    bodyTumble: 0.02,
+    cabin: [[0.005, 2.55, 1.35, 1.03], [0.995, 2.55, 1.35, 1.03]], // window band stands slightly proud of the sides
+    cabinExp: 20,
+    cabinTumble: 0,
+    wheelRadius: 0.52,
+    wheelT: [0.17, 0.76],
+    strakes: false,
+    spoiler: 'none',
+    archSquare: 4,
+  },
   /** Origami wedge: all hard flat planes, low-poly octagonal sections, fully faceted. */
   razor: {
     name: 'razor',
     length: 4.5,
-    width: 2.0,
+    width: 2.06,
     body: [[0.0, 0.36, 0.2, 0.8], [0.08, 0.48, 0.17, 0.94], [0.35, 0.66, 0.16, 1.0], [0.65, 0.84, 0.17, 1.0], [0.95, 0.86, 0.2, 1.0], [1.0, 0.84, 0.3, 0.97]],
     bodyExp: 2,
     bodyTumble: 0.25,
@@ -190,6 +208,8 @@ export interface CarOptions {
   accent?: THREE.ColorRepresentation;
   /** Paint / neon finish: free = standard, pro = deep metallic clear-coat, elite = iridescent pearl. */
   tier?: 'free' | 'pro' | 'elite';
+  /** Always use the procedural body (e.g. the space roadster, which removes its greenhouse). */
+  procedural?: boolean;
 }
 
 export interface BuiltCar {
@@ -532,11 +552,13 @@ function mergeStaticParts(car: THREE.Object3D): void {
   }
   for (const [mat, meshes] of groups) {
     if (meshes.length < 2) continue;
+    // Keep uv only when every part has it (hand-modelled bodies come without).
+    const keep = meshes.every((m) => m.geometry.getAttribute('uv')) ? ['position', 'normal', 'uv'] : ['position', 'normal'];
     const geos = meshes.map((m) => {
       m.updateMatrix();
       let g = m.geometry.clone().applyMatrix4(m.matrix);
       if (g.index) g = g.toNonIndexed();
-      for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+      for (const k of Object.keys(g.attributes)) if (!keep.includes(k)) g.deleteAttribute(k);
       return g;
     });
     const merged = mergeGeometries(geos);
@@ -576,8 +598,8 @@ export function setCarFogGlow(k: number): void {
  * Real-car proportions: the base station tables were drawn low (F1-ish). Road cars get noticeably taller
  * bodies, roofs and more ground clearance; the race cars only a little. Wheels grow a bit with them.
  */
-const HEIGHT_SCALE: Record<string, number> = { wedge: 1.14, muscle: 1.16, coupe: 1.16, hatch: 1.12, gt: 1.14, proto: 1.05, hyper: 1.07, razor: 1.12 };
-function raiseStyle(st: CarStyle): CarStyle {
+const HEIGHT_SCALE: Record<string, number> = { bus: 1, wedge: 1.14, muscle: 1.16, coupe: 1.16, hatch: 1.12, gt: 1.14, proto: 1.05, hyper: 1.07, razor: 1.12 };
+export function raiseStyle(st: CarStyle): CarStyle {
   const k = HEIGHT_SCALE[st.name] ?? 1.15;
   const lift = (rows: Station[]): Station[] => rows.map(([t, top, bottom, hw]) => [t, top * k, bottom * (1 + (k - 1) * 1.3), hw]);
   return { ...st, body: lift(st.body), cabin: lift(st.cabin), wheelRadius: st.wheelRadius * (1 + (k - 1) * 0.45) };
@@ -658,14 +680,33 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
   const doorF = Math.max(c0 + 0.05, style.wheelT[0] + archT + 0.02);
   const doorR = Math.min(c0 + (c1 - c0) * 0.62, style.wheelT[1] - archT - 0.03);
   applyBodyDetail(bodyPaint, [c0 - 0.01, doorF, doorR, c1 < 0.95 ? c1 + 0.015 : 2], L, hwm, tier === 'free' ? 0.18 : 0.3, style.facet ?? 0.22);
-  const body = new THREE.Mesh(bodyGeo, bodyPaint);
-  car.add(body);
-
-  const lowPoly = (style.around ?? 40) < 16;
-  const cabinGlass = lowPoly ? Object.assign(glass.clone(), { flatShading: true }) : glass;
-  const cabin = new THREE.Mesh(loft(style.cabin, { length: L, halfWidth: hwm, exp: style.cabinExp, tumble: style.cabinTumble, along: lowPoly ? 8 : 72, around: lowPoly ? 8 : 64 }), cabinGlass);
-  cabin.name = 'cabin';
-  car.add(cabin);
+  // Hand-modelled body (Blender .glb) when there is one; otherwise the procedural loft body + greenhouse.
+  const model = opts.procedural ? null : carModelFor(style.name);
+  // A complete model (Blender v2) has empties for its tail lights / exhausts and brings every detail itself.
+  const full = !!model?.getObjectByName('tail_L');
+  if (model && !full) {
+    const byName: Record<string, THREE.Material> = { paint, glass, trim, chrome, well: soot };
+    const greenhouse = new THREE.Group();
+    greenhouse.name = 'cabin'; // the space roadster removes it to make a convertible
+    model.updateMatrixWorld(true);
+    model.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const mats = (Array.isArray(m.material) ? m.material : [m.material]).map((x) => byName[x.name] ?? paint);
+      const mesh = new THREE.Mesh(m.geometry, mats.length === 1 ? mats[0] : mats);
+      mesh.applyMatrix4(m.matrixWorld);
+      (/greenhouse|bpillar|windowline|louvre/.test(m.name) ? greenhouse : car).add(mesh);
+    });
+    car.add(greenhouse);
+  } else if (!model) {
+    const body = new THREE.Mesh(bodyGeo, bodyPaint);
+    car.add(body);
+    const lowPoly = (style.around ?? 40) < 16;
+    const cabinGlass = lowPoly ? Object.assign(glass.clone(), { flatShading: true }) : glass;
+    const cabin = new THREE.Mesh(loft(style.cabin, { length: L, halfWidth: hwm, exp: style.cabinExp, tumble: style.cabinTumble, along: lowPoly ? 8 : 72, around: lowPoly ? 8 : 64 }), cabinGlass);
+    cabin.name = 'cabin';
+    car.add(cabin);
+  }
 
   // Wheel-well liners (dark arch lips).
   for (const wi of archP > 2.5 ? [] : wells) {
@@ -1093,6 +1134,39 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
   const under = new THREE.Mesh(new THREE.BoxGeometry(W * 0.75, 0.03, L * 0.75), glow(accent, tier === 'elite' ? 6 : tier === 'pro' ? 4 : 2.5));
   under.position.y = 0.16;
   car.add(under);
+
+  if (model && full) {
+    // Complete model: keep only the game's wheels, contact shadow, underglow and light halos from the
+    // procedural build, then add the model with the game's own materials (lamps animate with the brakes).
+    const keep = new Set<THREE.Object3D>([...wheels, shadow, under]);
+    for (const o of [...car.children]) if (!keep.has(o) && !(o as THREE.Sprite).isSprite) car.remove(o);
+    const neonMat = glow(accent, tier === 'elite' ? 5 : tier === 'pro' ? 4 : 3);
+    const byName: Record<string, THREE.Material> = {
+      paint, glass, trim, chrome, well: soot, carbon, rubber: tyre,
+      tail: tailMat, brake: cblMat, head: glow('#eaf6ff', 6), amber: glow('#ff9a20', 1.6), neon: neonMat, exhaust: glow('#ff7a20', 1.8),
+    };
+    model.updateMatrixWorld(true);
+    const empties: Record<string, THREE.Vector3> = {};
+    model.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (/^(tail|exhaust)_[LR]/.test(o.name)) empties[o.name.slice(0, o.name.indexOf('_') + 2)] = new THREE.Vector3().setFromMatrixPosition(o.matrixWorld);
+      if (!m.isMesh) return;
+      const mats = (Array.isArray(m.material) ? m.material : [m.material]).map((x) => byName[x.name.replace(/\.\d+$/, '')] ?? paint);
+      const mesh = new THREE.Mesh(m.geometry, mats.length === 1 ? mats[0] : mats);
+      mesh.applyMatrix4(m.matrixWorld);
+      car.add(mesh);
+    });
+    // Effects anchor on the model's own lamps / pipes.
+    if (empties.tail_L && empties.tail_R) {
+      tailLights.length = 0;
+      tailLights.push(empties.tail_L, empties.tail_R);
+      halos.forEach((h, i) => h.position.copy(tailLights[i]).add(new THREE.Vector3(0, 0, 0.06)));
+    }
+    if (empties.exhaust_L && empties.exhaust_R) {
+      exhausts.length = 0;
+      exhausts.push(empties.exhaust_L, empties.exhaust_R);
+    }
+  }
 
   mergeStaticParts(car);
   car.traverse((o) => {

@@ -37,7 +37,7 @@ export const cyberGrid: LevelDef = {
     lampsOn: false, leftNeon: '#00e5ff', rightNeon: '#ff2bd6', leftLamp: '#00e5ff', rightLamp: '#ff2bd6',
     neonIntensity: 1.6, asphalt: '#0a0a14', reflect: 1.1, wetness: 0.9, concrete: '#101020', wallStyle: 'rail', lampStyle: 'none', railColor: '#202040',
   },
-  weathers: ['clear', 'rain', 'fog', 'storm'],
+  weathers: ['clear', 'rain', 'storm'],
   defaultWeather: 'clear',
   billboards: designs('overdrive', 'synthFm', 'neonNights', 'palmFm', 'tropicNights', 'cyberBeach', 'driveFast', 'miami2084'),
   ambience: 'grid',

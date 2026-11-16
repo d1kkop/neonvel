@@ -17,6 +17,13 @@ export class Hud {
   private readonly boostFill: HTMLElement;
   private readonly boostBox: HTMLElement;
   private readonly lines: HTMLElement;
+  private readonly beatDot: HTMLElement;
+  private readonly modeEl: HTMLElement;
+  private readonly vcr: HTMLElement;
+  private vcrTimer = 0;
+  private readonly posBox: HTMLElement;
+  private readonly beatPopEl: HTMLElement;
+  private beatPopTimer = 0;
   private linesK = 0;
   /** Touch boost button held. */
   boostHeld = false;
@@ -33,10 +40,12 @@ export class Hud {
         <div class="hud-small" style="margin-top:8px">TIME</div><div class="hud-big" data-time>0:00.00</div>
         <div class="hud-laptime"><span class="hud-small">LAP</span> <span data-laptime>0:00.00</span></div>
         <div class="hud-laptime"><span class="hud-small">BEST</span> <span data-best>—</span></div></div>
-      <div class="hud-tr"><div class="hud-small">POS</div><div class="hud-big" data-pos>1/4</div></div>
+      <div class="hud-tr"><div data-posbox><div class="hud-small">POS</div><div class="hud-big" data-pos>1/4</div></div><div class="hud-mode" data-mode></div></div>
       <div class="hud-speed"><span class="v" data-speed>0</span><span class="u">KM/H</span><div class="hud-bar" data-bar></div></div>
       <div class="speedlines" data-lines></div>
-      <div class="hud-boost" data-boostbox><div class="hud-small">BOOST</div><div class="boost-track"><div class="boost-fill" data-boost></div></div></div>
+      <div class="beat-pop" data-beatpop></div>
+      <div class="vcr-osd" data-vcr></div>
+      <div class="hud-boost" data-boostbox><div class="hud-small"><span class="beat-dot" data-beatdot></span>BOOST</div><div class="boost-track"><div class="boost-fill" data-boost></div></div></div>
       <button class="boost-btn" data-boostbtn>BOOST</button>
       <div class="countdown" data-count></div>
       <div class="hud-msg" data-msg></div>
@@ -56,6 +65,11 @@ export class Hud {
     this.boostFill = q('[data-boost]');
     this.boostBox = q('[data-boostbox]');
     this.lines = q('[data-lines]');
+    this.beatDot = q('[data-beatdot]');
+    this.modeEl = q('[data-mode]');
+    this.vcr = q('[data-vcr]');
+    this.posBox = q('[data-posbox]');
+    this.beatPopEl = q('[data-beatpop]');
     const bb = q('[data-boostbtn]');
     const hold = (on: boolean) => (e: Event) => { e.preventDefault(); this.boostHeld = on; bb.classList.toggle('held', on); };
     bb.addEventListener('pointerdown', hold(true));
@@ -84,7 +98,7 @@ export class Hud {
     this.boostBox.classList.toggle('firing', !!d.boosting);
     this.linesK += ((d.boosting ? 1 : 0) - this.linesK) * Math.min(1, (d.dt ?? 1 / 60) * 6);
     this.lines.style.opacity = (this.linesK * 0.6).toFixed(3);
-    this.lap.textContent = `${Math.min(d.lap, d.laps)}/${d.laps}`;
+    this.lap.textContent = Number.isFinite(d.laps) ? `${Math.min(d.lap, d.laps)}/${d.laps}` : String(d.lap);
     this.pos.textContent = `${d.pos}/${d.total}`;
     this.time.textContent = formatTime(d.time);
     this.speed.textContent = String(Math.round(d.kmh));
@@ -93,6 +107,40 @@ export class Hud {
       b.classList.toggle('on', i < n);
       b.classList.toggle('hot', i >= this.bar.length * 0.75);
     });
+  }
+
+  /** VCR on-screen text ("◀◀ REW", "▶ PLAY"); seconds = 0 keeps it until replaced. */
+  vcrText(text: string, seconds = 1.6): void {
+    this.vcr.textContent = text;
+    this.vcr.style.opacity = text ? '1' : '0';
+    window.clearTimeout(this.vcrTimer);
+    if (text && seconds > 0) this.vcrTimer = window.setTimeout(() => (this.vcr.style.opacity = '0'), seconds * 1000);
+  }
+
+  /** Game-mode lines (null = normal race: show the position instead). */
+  setModeLines(lines: string[] | null): void {
+    this.posBox.style.display = lines ? 'none' : '';
+    const html = lines ? lines.filter(Boolean).map((l) => `<div>${l}</div>`).join('') : '';
+    if (this.modeEl.innerHTML !== html) this.modeEl.innerHTML = html;
+  }
+
+  /** Beat indicator: k = 0..1 pulse; `window` = currently inside the on-beat window. */
+  setBeat(k: number, inWindow: boolean): void {
+    this.beatDot.style.opacity = (0.25 + 0.75 * k).toFixed(2);
+    this.beatDot.style.transform = `scale(${(0.8 + 0.6 * k).toFixed(2)})`;
+    this.beatDot.classList.toggle('window', inWindow);
+  }
+
+  /** Short popup for an on-beat move ("ON BEAT ×3"). */
+  beatPop(text: string, good: boolean): void {
+    const el = this.beatPopEl;
+    el.textContent = text;
+    el.classList.toggle('miss', !good);
+    el.classList.remove('show');
+    void el.offsetWidth; // restart the animation
+    el.classList.add('show');
+    window.clearTimeout(this.beatPopTimer);
+    this.beatPopTimer = window.setTimeout(() => el.classList.remove('show'), 900);
   }
 
   setCountdown(text: string | null): void {

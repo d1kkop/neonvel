@@ -37,7 +37,7 @@ export const snowPass: LevelDef = {
     lampsOn: true, leftNeon: '#3dff9e', rightNeon: '#a64dff', leftLamp: '#d8e8ff', rightLamp: '#d8e8ff',
     neonIntensity: 0.9, asphalt: '#3a3c46', reflect: 0.6, wetness: 0.55, concrete: '#5a5e6a', wallStyle: 'snowbank',
   },
-  weathers: ['clear', 'rain', 'fog', 'storm'],
+  weathers: ['clear', 'rain', 'storm'],
   defaultWeather: 'rain',
   precipitation: 'snow',
   billboards: designs('hotelParadise', 'synthFm', 'turboCola', 'neonNights', 'driveFast', 'palmFm', 'overdrive', 'tropicNights'),

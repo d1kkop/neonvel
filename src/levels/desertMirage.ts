@@ -36,7 +36,7 @@ export const desertMirage: LevelDef = {
     lampsOn: true, leftNeon: '#ff2bd6', rightNeon: '#ffb000', leftLamp: '#ffb36b', rightLamp: '#ff8ad8',
     neonIntensity: 0.9, asphalt: '#3a3036', reflect: 0.45, wetness: 0.15, concrete: '#8a5a4a', wallStyle: 'guardrail', railColor: '#9a8a7a',
   },
-  weathers: ['clear', 'rain', 'fog', 'storm'],
+  weathers: ['clear', 'rain', 'storm'],
   defaultWeather: 'clear',
   billboards: designs('overdrive', 'driveFast', 'miami2084', 'summer86', 'coconutTan', 'turboCola', 'neonNights', 'synthFm', 'tropicNights', 'miamiHeat'),
   ambience: 'desert',

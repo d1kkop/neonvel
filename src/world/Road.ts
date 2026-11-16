@@ -198,6 +198,13 @@ export class Road {
   readonly uniforms = roadUniforms;
   /** World positions + colours of street-lamp heads (for volumetric beams). */
   readonly lamps: { pos: THREE.Vector3; color: THREE.Color }[] = [];
+  /** Neon strip materials + their base colour (they pulse to the music's beat). */
+  readonly neonMats: { mat: THREE.MeshBasicMaterial; base: THREE.Color }[] = [];
+
+  /** 0..1 beat pulse (1 right on the beat, decaying). */
+  setBeatPulse(k: number): void {
+    for (const n of this.neonMats) n.mat.color.copy(n.base).multiplyScalar(1 + 0.75 * k);
+  }
 
   constructor(track: LoopTrack, opts: { reflectionScale: number; style: RoadStyleParams; pillars: boolean }) {
     const hw = track.width / 2;
@@ -269,8 +276,11 @@ export class Road {
       new THREE.MeshStandardMaterial({ color: st.concrete, roughness: 0.85, metalness: 0.1, side: THREE.DoubleSide }),
     );
     const wall = st.wallStyle ?? 'concrete';
-    const neon = (c: THREE.Color, k: number) =>
-      applyAtmosphere(new THREE.MeshBasicMaterial({ color: c.clone().multiplyScalar(k), side: THREE.DoubleSide }));
+    const neon = (c: THREE.Color, k: number) => {
+      const m = applyAtmosphere(new THREE.MeshBasicMaterial({ color: c.clone().multiplyScalar(k), side: THREE.DoubleSide }));
+      this.neonMats.push({ mat: m, base: m.color.clone() });
+      return m;
+    };
     const solidWalls = wall === 'concrete' || wall === 'snowbank';
     // Deck: with concrete walls, or a plain slab for the other styles.
     const deckProfile: [number, number][] = solidWalls

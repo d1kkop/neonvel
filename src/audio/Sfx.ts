@@ -28,6 +28,9 @@ export class Sfx {
   private readonly boostGain: GainNode;
   private readonly boostFilter: BiquadFilterNode;
   private boostOn = false;
+  private sirenGain: GainNode | null = null;
+  private sirenOsc: OscillatorNode | null = null;
+  private sirenLfo: OscillatorNode | null = null;
   /** When false the engine + wind are silenced (menus). */
   engineOn = true;
 
@@ -94,6 +97,59 @@ export class Sfx {
       o.start(t);
     }
     growlF.connect(growlG).connect(this.boostGain);
+  }
+
+  /** VHS rewind: a high, wobbly tape whine plus mechanical clunk. */
+  rewind(): void {
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(900, t);
+    o.frequency.exponentialRampToValueAtTime(2400, t + 0.9);
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 18;
+    const lg = ctx.createGain();
+    lg.gain.value = 120;
+    lfo.connect(lg).connect(o.frequency);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 1800;
+    f.Q.value = 2;
+    const g = ctx.createGain();
+    env(g.gain, t, 0.08, 0.05, 1.0);
+    o.connect(f).connect(g).connect(this.envFilter);
+    o.start(t); lfo.start(t);
+    o.stop(t + 1.2); lfo.stop(t + 1.2);
+    this.impact(0.25);
+  }
+
+  /** Police siren (two-tone wail), 0 = off … 1 = right behind you. Created on first use. */
+  setSiren(level: number): void {
+    const ctx = this.ctx;
+    if (!this.sirenGain) {
+      if (level <= 0.001) return;
+      const t = ctx.currentTime;
+      this.sirenGain = ctx.createGain();
+      this.sirenGain.gain.value = 0;
+      const f = ctx.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = 1100;
+      f.Q.value = 0.8;
+      this.sirenOsc = ctx.createOscillator();
+      this.sirenOsc.type = 'square';
+      this.sirenOsc.frequency.value = 760;
+      this.sirenLfo = ctx.createOscillator();
+      this.sirenLfo.type = 'square';
+      this.sirenLfo.frequency.value = 1.6; // hi-lo
+      const depth = ctx.createGain();
+      depth.gain.value = 190;
+      this.sirenLfo.connect(depth).connect(this.sirenOsc.frequency);
+      this.sirenOsc.connect(f).connect(this.sirenGain).connect(this.envFilter);
+      this.sirenOsc.start(t);
+      this.sirenLfo.start(t);
+    }
+    this.sirenGain.gain.setTargetAtTime(Math.max(0, Math.min(1, level)) * 0.09, ctx.currentTime, 0.15);
   }
 
   /** Boost roar on / off (called every frame); the roar brightens with speed. */

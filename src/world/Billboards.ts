@@ -25,7 +25,10 @@ export class Billboards {
 
   private readonly designCount: number;
 
-  constructor(track: LoopTrack, roofSpots: RoofSpot[], faceSpots: FaceSpot[], seed: number, designList: BillboardDesign[]) {
+  /** Per-frame animation (underwater boards bob in the current); undefined for static neon boards. */
+  update?: (time: number) => void;
+
+  constructor(track: LoopTrack, roofSpots: RoofSpot[], faceSpots: FaceSpot[], seed: number, designList: BillboardDesign[], private readonly style: 'neon' | 'underwater' = 'neon') {
     const rng = new Rng(seed ^ 0xb111b0a7);
     this.designCount = Math.max(1, Math.min(designList.length, ATLAS_COLS * ATLAS_ROWS));
     this.canvas = drawAtlas(designList);
@@ -67,7 +70,8 @@ export class Billboards {
       placements.push({ pos: f.pos, normal: f.normal, w: f.w, h: f.h, poleH: 0 });
     }
 
-    this.build(placements, rng);
+    if (this.style === 'underwater') this.buildUnderwater(placements, rng);
+    else this.build(placements, rng);
     void this.loadCustomImages();
   }
 
@@ -165,6 +169,123 @@ export class Billboards {
     boards.computeBoundingSphere();
     structure.computeBoundingSphere();
     this.group.add(boards, structure);
+  }
+
+  /**
+   * Underwater boards: a weathered sign in a rusty frame, held up by two orange buoys and anchored by a chain
+   * into the depths. No neon — the art looks printed, a bit faded and algae-stained, and bubbles rise from it.
+   * Each board bobs and sways gently in the current.
+   */
+  private buildUnderwater(list: Placement[], rng: Rng): void {
+    const rust = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#6b4a34', roughness: 0.9, metalness: 0.3 }));
+    const buoyMat = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#ff7020', roughness: 0.5, emissive: '#5a1800', emissiveIntensity: 0.4 }));
+    const bandMat = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#f0f0f0', roughness: 0.6 }));
+    const chainMat = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#2a2622', roughness: 0.8, metalness: 0.6 }));
+    const boards: { g: THREE.Group; base: THREE.Vector3; phase: number }[] = [];
+    const bubbleMats: THREE.ShaderMaterial[] = [];
+    list.forEach((p, i) => {
+      const w = p.w * 0.8, h = p.h * 0.8;
+      const g = new THREE.Group();
+      const cell = (this.designCount % 7 ? i * 7 : i) % this.designCount;
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { ...atmosphere, uAtlas: { value: this.texture }, uCell: { value: cell }, uSeed: { value: rng.next() } },
+        vertexShader: 'varying vec2 vUv; varying vec3 vWorld; void main() { vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0); vWorld = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+        fragmentShader: /* glsl */ `
+          uniform sampler2D uAtlas; uniform float uCell, uSeed;
+          varying vec2 vUv; varying vec3 vWorld;
+          ${ATMOS_PARS}
+          float h21(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+          float vn(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(h21(i), h21(i + vec2(1, 0)), u.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), u.x), u.y); }
+          void main() {
+            float col = mod(uCell, ${ATLAS_COLS}.0);
+            float row = floor(uCell / ${ATLAS_COLS}.0);
+            vec2 inset = vUv * 0.98 + 0.01;
+            vec2 auv = vec2((col + inset.x) / ${ATLAS_COLS}.0, (${ATLAS_ROWS}.0 - 1.0 - row + inset.y) / ${ATLAS_ROWS}.0);
+            vec3 c = texture2D(uAtlas, auv).rgb;
+            // Printed and sun-faded under water: less saturated, tinted by the sea.
+            float l = dot(c, vec3(0.3, 0.55, 0.15));
+            c = mix(c, vec3(l), 0.25) * vec3(0.85, 1.0, 1.05) * 0.95;
+            // Algae and grime creeping up from the bottom edge, darker towards the corners.
+            float n = vn(vUv * vec2(18.0, 9.0) + uSeed * 40.0) * 0.6 + vn(vUv * 50.0) * 0.4;
+            float algae = smoothstep(0.42, 0.0, vUv.y + n * 0.25 - 0.08);
+            c = mix(c, vec3(0.08, 0.2, 0.12), algae * 0.75);
+            vec2 e = min(vUv, 1.0 - vUv);
+            c *= 0.65 + 0.35 * smoothstep(0.0, 0.18, min(e.x, e.y * 2.0));
+            gl_FragColor = vec4(applyAtmos(c, vWorld), 1.0);
+          }`,
+      });
+      const board = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+      g.add(board);
+      const back = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, h + 0.5, 0.35), rust);
+      back.position.z = -0.25;
+      g.add(back);
+      for (const [fw, fh, fx, fy] of [[w + 0.9, 0.35, 0, h / 2 + 0.3], [w + 0.9, 0.35, 0, -h / 2 - 0.3], [0.35, h + 0.9, w / 2 + 0.3, 0], [0.35, h + 0.9, -w / 2 - 0.3, 0]]) {
+        const f = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, 0.5), rust);
+        f.position.set(fx, fy, 0);
+        g.add(f);
+      }
+      for (const sx of [-1, 1]) {
+        const buoy = new THREE.Mesh(new THREE.SphereGeometry(1.1, 16, 12), buoyMat);
+        buoy.position.set(sx * w * 0.36, h / 2 + 1.4, 0);
+        const band = new THREE.Mesh(new THREE.CylinderGeometry(1.12, 1.12, 0.3, 16), bandMat);
+        band.position.copy(buoy.position);
+        const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.9, 6), chainMat);
+        rope.position.set(sx * w * 0.36, h / 2 + 0.55, 0);
+        g.add(buoy, band, rope);
+      }
+      const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 40, 6), chainMat);
+      chain.position.set(0, -h / 2 - 20, -0.2);
+      g.add(chain);
+      // Bubbles rising from the board (simulated in the vertex shader, looping).
+      const N = 26;
+      const bpos = new Float32Array(N * 3), bseed = new Float32Array(N);
+      for (let k = 0; k < N; k++) {
+        bpos.set([(rng.next() - 0.5) * w, -h / 2 + rng.next() * h * 0.4, (rng.next() - 0.5) * 1.5 + 0.6], k * 3);
+        bseed[k] = rng.next();
+      }
+      const bg = new THREE.BufferGeometry();
+      bg.setAttribute('position', new THREE.BufferAttribute(bpos, 3));
+      bg.setAttribute('aSeed', new THREE.BufferAttribute(bseed, 1));
+      const bmat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false,
+        uniforms: { uTime: atmosphere.uTime, uRise: { value: h + 6 } },
+        vertexShader: `attribute float aSeed; uniform float uTime, uRise; varying float vA;
+          void main() {
+            float t = fract(uTime * (0.12 + aSeed * 0.1) + aSeed);
+            vec3 p = position + vec3(sin(uTime * 2.0 + aSeed * 30.0) * 0.15, t * uRise, 0.0);
+            vA = smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.75, 1.0, t));
+            vec4 mv = modelViewMatrix * vec4(p, 1.0);
+            gl_PointSize = (2.0 + aSeed * 3.0) * 170.0 / max(-mv.z, 1.0);
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: `varying float vA;
+          void main() { float r = length(gl_PointCoord - 0.5); float ring = smoothstep(0.3, 0.42, r) * smoothstep(0.5, 0.44, r) + 0.5 * smoothstep(0.14, 0.0, length(gl_PointCoord - vec2(0.36, 0.34)));
+            if (ring * vA < 0.02) discard; gl_FragColor = vec4(vec3(0.8, 0.95, 1.0), ring * vA * 0.8); }`,
+      });
+      bubbleMats.push(bmat);
+      const bubbles = new THREE.Points(bg, bmat);
+      bubbles.frustumCulled = false;
+      g.add(bubbles);
+      // Orient like the neon board would face, a bit higher: it floats.
+      const up = new THREE.Vector3(0, 1, 0);
+      const xAxis = new THREE.Vector3().crossVectors(up, p.normal).normalize();
+      g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, up, p.normal));
+      const base = p.pos.clone().addScaledVector(up, h / 2 + 3);
+      g.position.copy(base);
+      this.group.add(g);
+      boards.push({ g, base, phase: rng.next() * Math.PI * 2 });
+    });
+    const tmpQ = new THREE.Quaternion();
+    const baseQ = boards.map((b) => b.g.quaternion.clone());
+    const sway = new THREE.Euler();
+    this.update = (time: number) => {
+      boards.forEach((b, i) => {
+        b.g.position.y = b.base.y + Math.sin(time * 0.6 + b.phase) * 0.7;
+        sway.set(Math.sin(time * 0.45 + b.phase) * 0.03, 0, Math.sin(time * 0.37 + b.phase * 1.3) * 0.05);
+        b.g.quaternion.copy(baseQ[i]).multiply(tmpQ.setFromEuler(sway));
+      });
+    };
   }
 
   /** Replace atlas cells with images listed in public/billboards/manifest.json. */

@@ -35,7 +35,7 @@ export const orbitRun: LevelDef = {
     lampsOn: false, leftNeon: '#00e5ff', rightNeon: '#a64dff', leftLamp: '#bfe8ff', rightLamp: '#d8b8ff',
     neonIntensity: 1.4, asphalt: '#1a1a24', reflect: 0.8, wetness: 0.7, concrete: '#2a2a38', wallStyle: 'glass', lampStyle: 'none', railColor: '#a0c8ff',
   },
-  weathers: ['clear', 'fog'],
+  weathers: ['clear'],
   defaultWeather: 'clear',
   billboards: designs('overdrive', 'synthFm', 'cyberBeach', 'neonNights', 'driveFast', 'turboCola', 'tropicNights', 'palmFm'),
   ambience: 'space',

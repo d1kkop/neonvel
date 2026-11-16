@@ -48,7 +48,7 @@ export const palmCoast: LevelDef = {
     lampsOn: false, leftNeon: '#00c8d8', rightNeon: '#ff5fb0', leftLamp: '#ffffff', rightLamp: '#ffffff',
     neonIntensity: 0.45, asphalt: '#55545c', reflect: 0.22, wetness: 0.1, concrete: '#efe9df', wallStyle: 'guardrail', lampStyle: 'post', railColor: '#e8ecf2',
   },
-  weathers: ['clear', 'rain', 'fog', 'storm'],
+  weathers: ['clear', 'rain', 'storm'],
   defaultWeather: 'clear',
   billboards: designs(
     'miamiHeat', 'sunsetClub', 'coconutTan', 'surfParadise', 'summer86', 'bikiniBar', 'palmFm', 'turboCola',

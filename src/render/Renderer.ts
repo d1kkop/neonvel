@@ -13,6 +13,8 @@ export class Renderer {
   readonly composer: EffectComposer;
   readonly bloom: UnrealBloomPass;
   private readonly renderPass: RenderPass;
+  /** VHS look (after the output pass): strength 0 = off, rewind 0..1 = heavy tape distortion. */
+  readonly vhs: ShaderPass;
 
   constructor(container: HTMLElement, scene: THREE.Scene, camera: THREE.Camera) {
     this.webgl = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -43,6 +45,52 @@ export class Renderer {
     this.bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.32, 0.3, 1.15);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
+    this.vhs = new ShaderPass({
+      uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uStrength: { value: 0 }, uRewind: { value: 0 }, uRes: { value: new THREE.Vector2(size.x, size.y) } },
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: /* glsl */ `
+        uniform sampler2D tDiffuse; uniform float uTime, uStrength, uRewind; uniform vec2 uRes;
+        varying vec2 vUv;
+        float h11(float p) { return fract(sin(p * 127.1) * 43758.5453); }
+        float h21(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+        void main() {
+          vec2 uv = vUv;
+          float k = uStrength;
+          // Tape wobble + an occasional rolling tracking band (much stronger while rewinding).
+          float band = fract(uTime * (0.07 + uRewind * 1.6));
+          float inBand = smoothstep(0.04, 0.0, abs(uv.y - band)) * (0.25 + uRewind * 3.0);
+          float line = floor(uv.y * uRes.y * 0.5);
+          uv.x += (h11(line + floor(uTime * 30.0)) - 0.5) * (0.0012 * k + inBand * 0.02 * max(k, uRewind) + uRewind * 0.01);
+          uv.x += sin(uv.y * 40.0 + uTime * 3.0) * 0.0006 * k;
+          // Chroma bleed: red and blue drift apart horizontally.
+          float ca = (1.2 + uRewind * 6.0) / uRes.x * k + uRewind * 3.0 / uRes.x;
+          vec3 col;
+          col.r = texture2D(tDiffuse, uv + vec2(ca, 0.0)).r;
+          col.g = texture2D(tDiffuse, uv).g;
+          col.b = texture2D(tDiffuse, uv - vec2(ca, 0.0)).b;
+          // Slightly soft, warm, a touch desaturated (old tape), scanlines, grain, vignette.
+          float lum = dot(col, vec3(0.299, 0.587, 0.114));
+          col = mix(col, vec3(lum), 0.08 * k);
+          col *= mix(vec3(1.0), vec3(1.03, 1.0, 0.95), k);
+          col *= 1.0 - k * 0.08 * (0.5 + 0.5 * sin(uv.y * uRes.y * 1.5708));
+          col += (h21(uv * uRes + uTime * 60.0) - 0.5) * (0.035 * k + uRewind * 0.1);
+          col += inBand * 0.06 * vec3(0.8, 0.9, 1.0) * max(k, uRewind);
+          vec2 d = vUv - 0.5;
+          col *= 1.0 - k * 0.35 * dot(d, d) * 2.2;
+          gl_FragColor = vec4(col, 1.0);
+        }`,
+    });
+    this.vhs.enabled = false;
+    this.composer.addPass(this.vhs);
+  }
+
+  /** VHS look on/off (0..1) and the rewind distortion (0..1). */
+  setVhs(strength: number, rewind: number, time: number): void {
+    const u = this.vhs.uniforms;
+    u.uStrength.value = strength;
+    u.uRewind.value = rewind;
+    u.uTime.value = time;
+    this.vhs.enabled = strength > 0.001 || rewind > 0.001;
   }
 
   setScene(scene: THREE.Scene, camera: THREE.Camera): void {
@@ -56,6 +104,7 @@ export class Renderer {
     this.webgl.setSize(w, h);
     this.composer.setPixelRatio(this.webgl.getPixelRatio());
     this.composer.setSize(w, h);
+    this.webgl.getDrawingBufferSize(this.vhs.uniforms.uRes.value);
   }
 
   render(): void {

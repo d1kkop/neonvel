@@ -5,14 +5,16 @@ import { AudioEngine } from '../audio/AudioEngine';
 import { GameLoop } from '../core/GameLoop';
 import { ChaseCamera } from '../game/ChaseCamera';
 import { World } from '../game/World';
-import { AI_DIFFICULTY } from '../game/CarPhysics';
+import { AI_DIFFICULTY, type CarPhys } from '../game/CarPhysics';
+import { preloadCarModels } from '../game/car/carModels';
+import { type GameMode, HeatMode, HighwayMode } from '../game/modes';
 import { levelById } from '../levels';
 import type { LevelDef } from '../levels/types';
 import { NetClient, NetPlayer, ServerMsg } from '../net/NetClient';
 import { Store } from '../net/Store';
 import { ENGINES } from '../audio/engineProfiles';
 import { LEVEL_NAMES, levelItem, levelPrice } from '../game/products';
-import { carById, formatPrice, specFromStats } from '../game/car/catalog';
+import { carById, formatPrice, specFor } from '../game/car/catalog';
 import type { CarSetup } from '../game/World';
 import { isMobile, Mirror, Renderer } from '../render/Renderer';
 import { makeFrame } from '../track/Track';
@@ -20,6 +22,7 @@ import type { WeatherName } from '../world/weather/Weather';
 import { formatTime, Hud } from './Hud';
 import { Input } from './Input';
 import { Menu, ResultRow } from './Menu';
+import type { MinimapCar } from './Minimap';
 import { loadSettings, saveSettings, Settings } from './settings';
 
 /** Level behind the main menu (its music, Space City, is the theme tune). */
@@ -134,6 +137,7 @@ export class App {
       if (e.code === 'KeyC' && this.state !== 'menu') this.freeCam = !this.freeCam;
     });
     window.addEventListener('resize', () => this.onResize());
+    window.addEventListener('keydown', (e) => { if (e.code === 'KeyR' && !(e.target instanceof HTMLInputElement)) this.tryRewind(); });
     // First user gesture unlocks audio (browser rule) and reveals the menu buttons.
     const unlock = () => {
       this.menu.unlockStart();
@@ -152,6 +156,10 @@ export class App {
 
     this.loadMenuWorld(levelById(MENU_LEVEL), true);
     this.menu.show('main');
+    // Hand-modelled car bodies (small .glb files): once loaded, rebuild the title background with them.
+    void preloadCarModels().then(() => {
+      if (this.state === 'menu' && this.onTitle && this.world) this.loadMenuWorld(levelById(MENU_LEVEL), true);
+    });
     // Returning from Stripe Checkout?
     void this.store.confirmFromUrl().then((r) => {
       if (!r) return;
@@ -190,6 +198,11 @@ export class App {
     w.onLevelSound = (kind) => { if (kind === 'dolphin') this.audio.ambience?.dolphin(); };
     this.renderer.setScene(w.scene, this.camera);
     this.world = w;
+    // The chase camera sits further back / higher for long vehicles (the bus).
+    const len = w.player.car.style.length;
+    const k = Math.max(1, len / 4.6);
+    this.chase.distance = 7.5 * Math.pow(k, 0.75);
+    this.chase.height = 2.4 * Math.pow(k, 0.6);
     const pm = carById(this.isOwned(this.settings.carId) ? this.settings.carId : 'vortex');
     this.audio.setEngineProfile(ENGINES[pm.engine] ?? ENGINES.flat12);
     this.applyAmbience();
@@ -205,7 +218,8 @@ export class App {
 
   /** Ground fog for races on this level: the player's toggle, else on when the level's default weather was fog. */
   private raceFog(level: LevelDef): boolean {
-    return this.settings.fog?.[level.id] ?? (level.firstWeather ?? level.defaultWeather) === 'fog';
+    void level;
+    return false; // fog was removed
   }
 
   /** Background world. The title screen always shows the level's calm default weather (no spoilers). */
@@ -217,10 +231,14 @@ export class App {
     let fx = -e[8], fz = -e[10];
     const fl = Math.hypot(fx, fz) || 1;
     fx /= fl; fz /= fl;
-    const cars = w.cars.filter((c) => !c.left).map((c) => {
+    const cars: MinimapCar[] = w.cars.filter((c) => !c.left).map((c) => {
       const gap = c.phys.s - p.phys.s;
       return { x: c.car.group.position.x, z: c.car.group.position.z, color: this.carColor(c.car.group), player: c.isPlayer, gap };
     });
+    for (const n of w.npcs) {
+      const police = n.kind === 'police';
+      cars.push({ x: n.car.group.position.x, z: n.car.group.position.z, color: police ? (Math.floor(performance.now() / 150) % 2 ? '#ff2040' : '#3070ff') : '#8a8a96', player: false, gap: n.phys.s - p.phys.s, minor: !police, noLabel: police });
+    }
     this.hud.minimap.draw(g.position.x, g.position.z, fx, fz, cars);
   }
 
@@ -239,6 +257,8 @@ export class App {
 
   private loadMenuWorld(level: LevelDef, title = false): void {
     this.onTitle = title;
+    this.mode = null;
+    this.audio.sfx?.setSiren(0);
     const weather = title ? level.defaultWeather : this.raceWeather(level);
     this.menuWeather = `${weather}|${!title && this.raceFog(level)}`;
     const w = this.buildWorld(level, weather, 3);
@@ -271,6 +291,8 @@ export class App {
 
   private startRace(): void {
     this.onTitle = false;
+    this.mode = null;
+    this.audio.sfx?.setSiren(0);
     window.clearTimeout(this.previewTimer);
     if (!this.isLevelOwned(this.settings.levelId)) {
       this.menu.toast('This level is locked — unlock it on the Quick Race screen.');
@@ -283,7 +305,9 @@ export class App {
     this.paused = false;
     // Let the loading screen paint before the (synchronous) level build.
     window.setTimeout(async () => {
-      const w = this.buildWorld(level, weather, this.settings.opponents);
+      await preloadCarModels(); // usually done long before (loaded at startup)
+      const modeId = this.settings.mode ?? 'race';
+      const w = this.buildWorld(level, weather, modeId === 'race' ? this.settings.opponents : 0);
       w.weather.setFog(this.raceFog(level), true);
       w.setDifficulty(this.settings.difficulty);
       // Compile all shaders up front (parallel where supported) so the race starts without hitches.
@@ -295,7 +319,12 @@ export class App {
         /* compile lazily */
       }
       if (this.world !== w) return;
-      this.laps = this.settings.laps;
+      this.laps = modeId === 'race' ? this.settings.laps : Infinity;
+      this.history.length = 0;
+      this.rewind = null;
+      this.rewindsLeft = 3;
+      this.mode = modeId === 'highway' ? new HighwayMode() : modeId === 'heat' ? new HeatMode() : null;
+      this.mode?.start(w);
       this.lastLap = 1;
       this.lapStart = 0;
       this.bestLap = Infinity;
@@ -395,6 +424,29 @@ export class App {
       return;
     }
 
+    // REWIND: play the recorded history backwards (4 snapshots per step = 4× speed), then resume.
+    if (this.rewind) {
+      for (let k = 0; k < 4 && this.history.length > 1; k++) this.history.pop();
+      const snap = this.history[this.history.length - 1];
+      if (snap) {
+        this.raceTime = snap.t;
+        w.cars.forEach((c, i) => {
+          const src = snap.cars[i];
+          if (!src) return;
+          const keepPrev = { ps: c.phys.s, px: c.phys.x, ppsi: c.phys.psi };
+          Object.assign(c.phys, src, keepPrev);
+        });
+      }
+      this.rewind.left -= 4;
+      if (this.rewind.left <= 0 || this.history.length <= 1) {
+        this.rewind = null;
+        this.history.length = 0;
+        this.hud.vcrText('▶ PLAY');
+        for (const c of w.cars) { c.phys.ps = c.phys.s; c.phys.px = c.phys.x; c.phys.ppsi = c.phys.psi; }
+      }
+      return;
+    }
+
     // Racing / finished (after the finish the AI takes over your car).
     this.raceTime += dt;
     const racing = this.state === 'racing';
@@ -412,6 +464,13 @@ export class App {
     const wasBoosting = p.phys.boosting;
     const ev = w.step(dt, inp);
     if (p.phys.boosting && !wasBoosting) this.audio.sfx?.boost();
+    if (racing) this.beatMoves(p.phys);
+    if (racing && !this.online && !this.mode) this.recordHistory(w);
+    if (this.mode && racing) {
+      this.mode.update(dt, w, ev);
+      for (const pop of this.mode.takePops()) this.hud.beatPop(pop.text, pop.good);
+      if (this.mode.done) this.finishMode();
+    }
     if (this.online && ++this.netTick % 4 === 0) {
       const ph = p.phys;
       this.net.send({ t: 'state', s: { s: ph.s, x: ph.x, psi: ph.psi, phi: ph.phi, v: ph.v, steer: ph.steer, drift: ph.driftAngle, b: ph.boosting ? 1 : 0 } });
@@ -447,6 +506,52 @@ export class App {
       if (this.online) this.finishOnline();
       else this.finishRace();
     }
+  }
+
+  // ------------------------------------------------------------ VHS rewind
+
+  private vhsTime = 0;
+  private rewindFx = 0;
+  private rewind: { left: number } | null = null;
+  private rewindsLeft = 3;
+  /** Last ~4 s of every car's physics state (one entry per sim step). */
+  private history: { t: number; cars: CarPhys[] }[] = [];
+
+  private recordHistory(w: World): void {
+    this.history.push({ t: this.raceTime, cars: w.cars.map((c) => ({ ...c.phys })) });
+    if (this.history.length > 60 * 4) this.history.shift();
+  }
+
+  /** R key: rewind ~4 s (normal races only, VHS look on, 3 per race). */
+  private tryRewind(): void {
+    // Never online: the other players' cars can't be rewound (and it would be a cheat in ranked races).
+    if (this.online && this.state === 'racing') { this.hud.vcrText('NO REWIND ONLINE', 1.2); return; }
+    if (this.settings.vhs === false || this.state !== 'racing' || this.online || this.mode || this.paused || this.rewind) return;
+    if (this.rewindsLeft <= 0) { this.hud.vcrText('NO TAPE LEFT', 1.2); return; }
+    if (this.history.length < 30) return;
+    this.rewindsLeft--;
+    this.rewind = { left: this.history.length };
+    this.hud.vcrText(`◀◀ REW  ${this.rewindsLeft}`, 0);
+    this.audio.sfx?.rewind();
+  }
+
+  /** Current game mode (Highway Rush / Heat), null in a normal race. */
+  private mode: GameMode | null = null;
+
+  private finishMode(): void {
+    const m = this.mode!;
+    this.state = 'finished';
+    const r = m.result();
+    this.audio.ui?.fanfare(r.won);
+    this.audio.sfx?.setSiren(0);
+    this.hud.message(r.title, 2.5);
+    const name = this.settings.playerName || 'YOU';
+    window.setTimeout(() => {
+      if (this.state !== 'finished') return;
+      this.hud.show(false);
+      this.audio.setEngine(false);
+      this.menu.showResults([{ pos: 1, name, time: r.score.toLocaleString('en-US'), isPlayer: true }], r.detail, 'Play Again', r.title, 'SCORE');
+    }, 2200);
   }
 
   private finishRace(): void {
@@ -498,7 +603,19 @@ export class App {
     }
 
     const covered = !!w.track.sectionAt(p.phys.s, 4) && this.state !== 'menu';
+    if (this.mode && (this.state === 'racing' || this.state === 'countdown')) {
+      this.mode.frame(dt, w);
+      this.hud.setModeLines(this.mode.hud());
+      this.audio.sfx?.setSiren(this.paused ? 0 : this.mode.siren);
+    } else this.hud.setModeLines(null);
+    // The world and the HUD pulse to the music's beat.
+    const bd = this.beatDistance();
+    w.beatPulse = bd && !this.paused ? bd.pulse : 0;
+    this.hud.setBeat(bd?.pulse ?? 0, !!bd && bd.dist <= App.BEAT_WINDOW);
     w.update(this.paused ? 0 : dt, this.camera, covered);
+    this.vhsTime += dt;
+    this.rewindFx += ((this.rewind ? 1 : 0) - this.rewindFx) * Math.min(1, dt * 10);
+    this.renderer.setVhs(this.settings.vhs !== false ? 1 : 0, this.rewindFx, this.vhsTime);
 
     if (this.state === 'racing' || this.state === 'finished' || this.state === 'countdown') {
       const L = w.track.length;
@@ -613,7 +730,7 @@ export class App {
       name: m.name,
       tier: m.tier,
       driftMode: this.settings.driveMode === 'drift',
-      spec: specFromStats(m.stats),
+      spec: specFor(m),
     };
   }
 
@@ -684,6 +801,52 @@ export class App {
   private lastMusicPick = '';
 
   /** Level track unless the player picked a fixed track or shuffle. `levelChanged` re-rolls shuffle. */
+  // ------------------------------------------------------------ drive to the beat
+
+  /** Beats away from the nearest beat (0 = on it, 0.5 = halfway), or null when the music has no beat clock. */
+  private beatDistance(): { dist: number; pulse: number; frac: number; index: number } | null {
+    const clock = this.audio.music?.beat;
+    const now = this.audio.ctx?.currentTime;
+    if (!clock || now === undefined) return null;
+    const b = clock.beatAt(now);
+    const frac = b - Math.floor(b);
+    return { dist: Math.min(frac, 1 - frac), pulse: Math.exp(-frac * 7), frac, index: Math.floor(b) };
+  }
+
+  private beatChain = 0;
+  private lastBeat = -1;
+  private wasBoostingBeat = false;
+  /** Beat window (in beats) for firing the boost on the beat. */
+  private static readonly BEAT_WINDOW = 0.17;
+
+  /**
+   * The music feeds the boost — no timing needed for drifts:
+   *  - every beat that passes while you're drifting adds boost, more the longer the drift keeps going;
+   *  - firing the boost on a beat gives an extra shove ("BEAT BOOST").
+   */
+  private beatMoves(ph: { drift: number; boost: number; boosting: boolean; v: number }): void {
+    const b = this.beatDistance();
+    const startedBoost = ph.boosting && !this.wasBoostingBeat;
+    this.wasBoostingBeat = ph.boosting;
+    if (!b) return;
+    if (b.index !== this.lastBeat) {
+      this.lastBeat = b.index;
+      if (ph.drift > 0.5 && ph.v > 12) {
+        this.beatChain = Math.min(this.beatChain + 1, 12);
+        ph.boost = Math.min(1, ph.boost + 0.02 + 0.012 * Math.min(this.beatChain, 6));
+        if (this.beatChain >= 2) this.hud.beatPop(`BEAT DRIFT ×${this.beatChain}`, true);
+      } else if (ph.drift < 0.3) {
+        this.beatChain = 0;
+      }
+    }
+    if (startedBoost && b.dist <= App.BEAT_WINDOW) {
+      ph.v += 3; // on top of the normal boost kick
+      ph.boost = Math.min(1, ph.boost + 0.05);
+      this.hud.beatPop('BEAT BOOST', true);
+      this.audio.sfx?.blip(true);
+    }
+  }
+
   /** True while the title screen's own background is showing (it always plays the theme). */
   private onTitle = false;
 
@@ -735,8 +898,11 @@ export class App {
     const g = w.player.car.group;
     this.tmpF.set(0, 0, -1).applyQuaternion(g.quaternion).setY(0).normalize();
     const cam = this.mirror.camera;
-    cam.position.copy(g.position).addScaledVector(this.tmpF, -2.7).setY(g.position.y + 1.05);
-    this.tmpV.copy(g.position).addScaledVector(this.tmpF, -30).setY(g.position.y + 0.6);
+    // Just behind the vehicle's tail (scaled for long ones like the bus), looking back.
+    const half = w.player.car.style.length / 2;
+    const k = Math.max(1, half / 2.3);
+    cam.position.copy(g.position).addScaledVector(this.tmpF, -(half + 0.45)).setY(g.position.y + 1.05 * k);
+    this.tmpV.copy(g.position).addScaledVector(this.tmpF, -30 * k).setY(g.position.y + 0.6 * k);
     cam.lookAt(this.tmpV);
     this.mirror.render(this.renderer.webgl, w.scene);
   }
@@ -780,7 +946,7 @@ export class App {
           id: p.id,
           name: p.id === m.you ? 'YOU' : p.name,
           local: p.id === m.you,
-          setup: p.id === m.you ? this.playerCarSetup() : { style: model.style, paint: p.car.paint || model.paint, accent: model.accent, spec: specFromStats(model.stats), tier: model.tier },
+          setup: p.id === m.you ? this.playerCarSetup() : { style: model.style, paint: p.car.paint || model.paint, accent: model.accent, spec: specFor(model), tier: model.tier },
         };
       });
       const serverWeather = (m.weather as WeatherName) ?? 'clear';

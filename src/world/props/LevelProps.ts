@@ -124,18 +124,81 @@ export function createContainers(list: Placement[]): THREE.InstancedMesh {
 }
 
 /** Gantry cranes: four legs, a deck and a long boom, with a red warning light (emissive). */
+/** A beam (box) from point a to point b (cross bracing, truss diagonals, stays). */
+function beam(ax: number, ay: number, az: number, bx: number, by: number, bz: number, t: number): THREE.BufferGeometry {
+  const a = new THREE.Vector3(ax, ay, az), b = new THREE.Vector3(bx, by, bz);
+  const len = a.distanceTo(b);
+  const g = new THREE.BoxGeometry(t, len, t);
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+  g.applyQuaternion(q);
+  const mid = a.add(b).multiplyScalar(0.5);
+  g.translate(mid.x, mid.y, mid.z);
+  return g.toNonIndexed();
+}
+
+/**
+ * Ship-to-shore container cranes: a braced portal on four legs, a long truss boom reaching out over the water
+ * (+Z), an A-frame with stay cables, a machinery house and a hanging spreader. At night: work lights along the
+ * boom, floodlights under it and a blinking red aviation light on top.
+ */
 export function createCranes(list: Placement[]): THREE.Group {
-  const parts = [
-    ...[[-6, -5], [6, -5], [-6, 5], [6, 5]].map(([x, z]) => new THREE.BoxGeometry(0.9, 34, 0.9).translate(x, 17, z)),
-    new THREE.BoxGeometry(14, 2, 12).translate(0, 34, 0),
-    new THREE.BoxGeometry(2, 1.6, 60).translate(0, 40, 14),
-    new THREE.BoxGeometry(3, 4, 4).translate(0, 37, -4),
-    new THREE.BoxGeometry(0.4, 10, 0.4).translate(0, 45, 0),
-  ].map((g) => g.toNonIndexed());
+  const H = 34; // portal beam height
+  const legs = [[-9, -7], [9, -7], [-9, 7], [9, 7]] as const;
+  const steel: THREE.BufferGeometry[] = [];
+  for (const [x, z] of legs) steel.push(new THREE.BoxGeometry(1.4, H, 1.4).translate(x, H / 2, z).toNonIndexed());
+  // Portal: top girders + cross bracing (X) on both sides and the ends.
+  steel.push(new THREE.BoxGeometry(20, 2.2, 1.6).translate(0, H, -7).toNonIndexed(), new THREE.BoxGeometry(20, 2.2, 1.6).translate(0, H, 7).toNonIndexed());
+  steel.push(new THREE.BoxGeometry(1.6, 2.2, 16).translate(-9, H, 0).toNonIndexed(), new THREE.BoxGeometry(1.6, 2.2, 16).translate(9, H, 0).toNonIndexed());
+  for (const x of [-9, 9]) {
+    steel.push(beam(x, 8, -7, x, H - 2, 7, 0.6), beam(x, 8, 7, x, H - 2, -7, 0.6));
+    steel.push(new THREE.BoxGeometry(0.8, 1.2, 14).translate(x, 8, 0).toNonIndexed());
+  }
+  // Boom: two chords with diagonals, from behind the portal (backreach) far out over the water.
+  const z0 = -26, z1 = 62, by = H + 6;
+  for (const x of [-1.6, 1.6]) {
+    steel.push(new THREE.BoxGeometry(0.9, 0.9, z1 - z0).translate(x, by, (z0 + z1) / 2).toNonIndexed());
+    steel.push(new THREE.BoxGeometry(0.7, 0.7, z1 - z0).translate(x, by - 3, (z0 + z1) / 2).toNonIndexed());
+    for (let z = z0; z < z1; z += 6) steel.push(beam(x, by - 3, z, x, by, z + 6, 0.35));
+  }
+  for (let z = z0; z <= z1; z += 12) steel.push(new THREE.BoxGeometry(3.6, 0.4, 0.4).translate(0, by, z).toNonIndexed());
+  // A-frame + stay cables to the boom.
+  steel.push(beam(-1.6, H, -6, 0, H + 26, 0, 1.0), beam(1.6, H, -6, 0, H + 26, 0, 1.0), beam(-1.6, H, 6, 0, H + 26, 0, 1.0), beam(1.6, H, 6, 0, H + 26, 0, 1.0));
+  for (const z of [22, 40, 58]) steel.push(beam(0, H + 26, 0, 0, by, z, 0.18));
+  steel.push(beam(0, H + 26, 0, 0, by, -24, 0.18));
+  // Machinery house on the backreach, trolley + hoist ropes + spreader over the quay edge.
+  steel.push(new THREE.BoxGeometry(6, 5, 9).translate(0, by + 2.5, -20).toNonIndexed());
+  steel.push(new THREE.BoxGeometry(4.2, 2, 4).translate(0, by - 4, 18).toNonIndexed());
+  for (const x of [-1.4, 1.4]) steel.push(new THREE.BoxGeometry(0.12, 18, 0.12).translate(x, by - 14, 18).toNonIndexed());
+  steel.push(new THREE.BoxGeometry(3, 0.8, 12.5).translate(0, by - 23, 18).toNonIndexed());
   const g = new THREE.Group();
-  g.add(instanced(mergeGeometries(parts), std('#d9a400', { roughness: 0.6, metalness: 0.4 }), list));
-  const lamp = new THREE.SphereGeometry(0.6, 8, 6).translate(0, 50.5, 0);
-  g.add(instanced(lamp, applyAtmosphere(new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff2020').multiplyScalar(5) })), list));
+  g.add(instanced(mergeGeometries(steel), std('#e2a210', { roughness: 0.55, metalness: 0.45, emissive: '#3a2400', emissiveIntensity: 0.6 }), list));
+  // Work lights along the boom underside + floodlights (bright cells) + a cabin with lit windows.
+  const lights: THREE.BufferGeometry[] = [];
+  for (let z = z0 + 3; z < z1; z += 5) lights.push(new THREE.BoxGeometry(0.5, 0.25, 0.5).translate(0, by - 3.6, z).toNonIndexed());
+  for (const [x, z] of legs) lights.push(new THREE.BoxGeometry(0.9, 0.4, 0.9).translate(x, H - 1.6, z).toNonIndexed());
+  lights.push(new THREE.BoxGeometry(2.4, 1, 0.1).translate(0, by - 4.2, 15.95).toNonIndexed());
+  g.add(instanced(mergeGeometries(lights), applyAtmosphere(new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffe2a8').multiplyScalar(4) })), list));
+  // Aviation lights: blink in sync (shader time on a shared material).
+  const lamp = new THREE.SphereGeometry(0.7, 8, 6).translate(0, H + 27, 0).toNonIndexed();
+  const tip = new THREE.SphereGeometry(0.5, 8, 6).translate(0, by + 0.8, z1).toNonIndexed();
+  const blink = new THREE.ShaderMaterial({
+    uniforms: { ...atmosphere },
+    vertexShader: 'varying vec3 vW; void main() { vec4 w = modelMatrix * instanceMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: `${ATMOS_PARS}
+      varying vec3 vW;
+      void main() { float on = step(0.5, fract(uTime * 0.7 + vW.x * 0.001)); gl_FragColor = vec4(applyAtmos(vec3(1.0, 0.08, 0.06) * (0.4 + 5.0 * on), vW), 1.0); }`,
+  });
+  g.add(instanced(mergeGeometries([lamp, tip]), blink, list));
+  // Soft light cones from the boom floodlights onto the quay.
+  const cone = new THREE.ConeGeometry(9, by - 4, 18, 1, true).translate(0, (by - 4) / 2, 0).toNonIndexed();
+  cone.translate(0, 0, 8);
+  const coneMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    uniforms: { uTop: { value: by - 4 } },
+    vertexShader: 'varying float vH; void main() { vH = position.y; gl_Position = projectionMatrix * viewMatrix * modelMatrix * instanceMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'uniform float uTop; varying float vH; void main() { float k = smoothstep(0.0, uTop, vH); gl_FragColor = vec4(vec3(1.0, 0.85, 0.6) * 0.05 * k, 1.0); }',
+  });
+  g.add(instanced(cone, coneMat, list));
   return g;
 }
 

@@ -137,7 +137,7 @@ export class FloatingRoadster extends Encounter {
   constructor(track: LoopTrack) {
     super(track, 6, [18, 28]);
     this.group.name = 'visitor-roadster';
-    const car = buildCar({ style: 'coupe', paint: '#d0102a', accent: '#ffffff', tier: 'pro' });
+    const car = buildCar({ style: 'coupe', paint: '#d0102a', accent: '#ffffff', tier: 'pro', procedural: true });
     car.group.getObjectByName('cabin')?.removeFromParent(); // convertible
     car.group.getObjectByName('shadow')?.removeFromParent(); // floating: no road under it
     car.setBrake(0);

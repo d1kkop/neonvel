@@ -24,6 +24,10 @@ export interface Settings {
   /** 'grip' = planted, 'drift' = held slides with brake/handbrake + steer. */
   driveMode: 'grip' | 'drift';
   opponents: number;
+  /** Quick Race game mode. */
+  mode: 'race' | 'highway' | 'heat';
+  /** VHS look (scanlines, tape wobble) + REWIND in races. */
+  vhs: boolean;
   /** AI opponent strength. */
   difficulty: AiDifficulty;
   /** Netplay: seconds to wait for a full 4-driver lobby before racing with fewer. */
@@ -53,6 +57,8 @@ const DEFAULTS: Settings = {
   music: 'auto',
   driveMode: 'grip',
   opponents: 3,
+  mode: 'race',
+  vhs: true,
   difficulty: 'normal',
   matchWait: 30,
   serverUrl: `ws://${location.hostname || 'localhost'}:8787`,

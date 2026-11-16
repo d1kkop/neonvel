@@ -12,14 +12,14 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { WebSocketServer, WebSocket } from 'ws';
 import { rateRace, START_RATING } from '../src/net/elo.ts';
-import { CARS, specFromStats } from '../src/game/car/catalog.ts';
+import { CARS, specFor, classOf } from '../src/game/car/catalog.ts';
 import { BOOST } from '../src/game/boostRules.ts';
 import { LEVEL_NAMES, LEVEL_PRICES } from '../src/game/products.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DB_PATH = process.env.DB_PATH ?? new URL('./neon.db', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const LEVELS = ['neon-skyway', 'palm-coast', 'desert-mirage', 'harbor-docks', 'snow-pass', 'cyber-grid', 'orbit-run', 'deep-blue'];
-const WEATHERS = ['clear', 'clear', 'rain', 'fog', 'storm'];
+const WEATHERS = ['clear', 'clear', 'rain', 'storm'];
 const MAX_PLAYERS = 4;
 
 // ------------------------------------------------------------------ database
@@ -226,6 +226,8 @@ function matchmake(): void {
     const ra = anchor.player!.rating;
     const candidates = waiting
       .filter((o) => o !== anchor && !used.has(o))
+      // Vehicle class: buses only race buses (totally different handling).
+      .filter((o) => classOf(o.car?.id ?? 'vortex') === classOf(anchor.car?.id ?? 'vortex'))
       .filter((o) => {
         const diff = Math.abs(o.player!.rating - ra);
         return diff <= windowFor(anchor, now) && diff <= windowFor(o, now);
@@ -276,7 +278,7 @@ function startMatch(group: Client[]): void {
     c.queuedAt = null;
     c.matchId = m.id;
     const model = CARS.find((x) => x.id === (c.car?.id ?? 'vortex')) ?? CARS[0];
-    const top = specFromStats(model.stats).topSpeed;
+    const top = specFor(model).topSpeed;
     c.chk = { meter: 1, top, allowedV: top, lastT: 0, lastNear: 0, last: null, violation: 0, warned: false };
   }
   const players = group.map((c) => ({ id: c.player!.id, name: c.player!.name, rating: c.player!.rating, car: c.car ?? { id: 'vortex', paint: '' } }));

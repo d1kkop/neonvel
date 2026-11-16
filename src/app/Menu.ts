@@ -179,7 +179,7 @@ export class Menu {
     const weather0 = s.weather[level.id] ?? level.firstWeather ?? level.defaultWeather;
     const weather = weather0 === 'fog' ? 'clear' : weather0;
     const fogOn = s.fog?.[level.id] ?? weather0 === 'fog';
-    const canFog = level.weathers.includes('fog');
+    const canFog = false; // fog was removed (it never looked right)
     const levelOwned = (id: string) => levelPrice(id) === 0 || s.ownedCars.includes(levelItem(id));
     const card = (l: { name: string; tagline: string; cardColors: [string, string] }, id?: string) => `
       <div tabindex="0" class="card ${id === level.id ? 'on' : ''} ${id ? '' : 'locked'} ${id && !levelOwned(id) ? 'paid' : ''}" ${id ? `data-level="${id}"` : ''}
@@ -196,10 +196,15 @@ export class Menu {
           <button class="chip ${fogOn ? '' : 'on'}" data-fog="0">Off</button>
           <button class="chip ${fogOn ? 'on' : ''}" data-fog="1">On</button>
           <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">Mist lying on the track — works with any weather.</span></div>` : ''}
+        <div class="row"><span class="label">Mode</span>
+          ${([['race', 'Race'], ['highway', 'Highway Rush'], ['heat', 'Heat']] as const).map(([m, label]) => `<button class="chip ${m === (s.mode ?? 'race') ? 'on' : ''}" data-mode="${m}">${label}</button>`).join('')}
+          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${(s.mode ?? 'race') === 'race' ? 'Classic race against the AI.' : s.mode === 'highway' ? 'Open road with traffic: near misses score, checkpoints add time — beat the clock.' : 'Police chase: survive 150 s without getting boxed in. The heat keeps rising.'}</span></div>
+        ${(s.mode ?? 'race') === 'race' ? '' : '<div style="display:none">'}
         <div class="row"><span class="label">Laps</span>
           ${[1, 2, 3, 5].map((n) => `<button class="chip ${n === s.laps ? 'on' : ''}" data-laps="${n}">${n}</button>`).join('')}</div>
         <div class="row"><span class="label">Opponents</span>
-          ${[1, 3, 5].map((n) => `<button class="chip ${n === s.opponents ? 'on' : ''}" data-opp="${n}">${n}</button>`).join('')}</div>
+          ${[1, 3, 5, 7, 10].map((n) => `<button class="chip ${n === s.opponents ? 'on' : ''}" data-opp="${n}">${n}</button>`).join('')}</div>
+        ${(s.mode ?? 'race') === 'race' ? '' : '</div>'}
         <div class="row"><span class="label">Car</span>
           <span style="font-family:Arial,sans-serif">${esc(carById(s.carId).name)}</span>
           <button class="chip" data-act="garage">Change in Garage</button></div>
@@ -225,6 +230,10 @@ export class Menu {
       s.fog ??= {};
       s.fog[level.id] = c.dataset.fog === '1';
       this.commit(); this.h.sound('select'); this.h.previewLevel(level); this.renderQuick();
+    }));
+    el.querySelectorAll<HTMLElement>('[data-mode]').forEach((c) => c.addEventListener('click', () => {
+      s.mode = c.dataset.mode as Settings['mode'];
+      this.commit(); this.h.sound('select'); this.renderQuick();
     }));
     el.querySelectorAll<HTMLElement>('[data-laps]').forEach((c) => c.addEventListener('click', () => {
       s.laps = +c.dataset.laps!; this.commit(); this.h.sound('select'); this.renderQuick();
@@ -433,6 +442,10 @@ export class Menu {
           <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${s.driveMode === 'drift'
             ? 'Steer hard + tap brake / SPACE at speed to slide; keep steering to hold the drift.'
             : 'Planted and precise. SPACE (handbrake) still kicks the tail out.'}</span></div>
+        <div class="row"><span class="label">VHS look</span>
+          <button class="chip ${s.vhs !== false ? 'on' : ''}" data-vhs="1">On</button>
+          <button class="chip ${s.vhs === false ? 'on' : ''}" data-vhs="0">Off</button>
+          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">80s videotape picture, and REWIND (R) in Quick Races — 3 per race. Not in Netplay or the Highway / Heat modes.</span></div>
         <div class="row"><span class="label">AI level</span>
           ${(['easy', 'normal', 'hard', 'impossible'] as const).map((d) => `<button class="chip ${d === (s.difficulty ?? 'normal') ? 'on' : ''}" data-diff="${d}">${d}</button>`).join('')}</div>
         <div class="row"><span class="label">Graphics</span>
@@ -475,6 +488,10 @@ export class Menu {
       s.driveMode = c.dataset.drive as Settings['driveMode'];
       this.commit(); this.h.sound('select'); this.renderOptions();
     }));
+    el.querySelectorAll<HTMLElement>('[data-vhs]').forEach((c) => c.addEventListener('click', () => {
+      s.vhs = c.dataset.vhs === '1';
+      this.commit(); this.h.sound('select'); this.renderOptions();
+    }));
     el.querySelectorAll<HTMLElement>('[data-diff]').forEach((c) => c.addEventListener('click', () => {
       s.difficulty = c.dataset.diff as Settings['difficulty'];
       this.commit(); this.h.sound('select'); this.renderOptions();
@@ -507,14 +524,14 @@ export class Menu {
     this.show('pause', false);
   }
 
-  showResults(rows: ResultRow[], extra = '', againLabel = 'Race Again'): void {
+  showResults(rows: ResultRow[], extra = '', againLabel = 'Race Again', headline?: string, timeLabel = 'TIME'): void {
     const el = this.screens.get('results')!;
     const me = rows.find((r) => r.isPlayer);
-    const head = me?.pos === 1 ? 'YOU WIN!' : `FINISHED P${me?.pos ?? '-'}`;
+    const head = headline ?? (me?.pos === 1 ? 'YOU WIN!' : `FINISHED P${me?.pos ?? '-'}`);
     el.innerHTML = `
       <div class="title" style="margin-top:12vh">${head}</div>
       <div class="panel" style="max-width:560px">
-        <table class="lb"><thead><tr><th>POS</th><th>DRIVER</th><th>TIME</th></tr></thead><tbody>
+        <table class="lb"><thead><tr><th>POS</th><th>DRIVER</th><th>${timeLabel}</th></tr></thead><tbody>
           ${rows.map((r) => `<tr class="${r.isPlayer ? 'me' : ''}"><td>${r.pos}</td><td>${esc(r.name)}</td><td>${r.time}</td></tr>`).join('')}
         </tbody></table>
         ${extra ? `<div class="status">${extra}</div>` : ''}

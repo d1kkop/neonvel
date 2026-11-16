@@ -4,3 +4,4 @@ server/*.db
 server/*.db-*
 .tmp
 renders
+__pycache__

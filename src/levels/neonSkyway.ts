@@ -45,7 +45,7 @@ export const neonSkyway: LevelDef = {
     lampsOn: true, leftNeon: '#00e5ff', rightNeon: '#ff2bd6', leftLamp: '#7fd8ff', rightLamp: '#ffae5c',
     neonIntensity: 1, asphalt: '#292732', reflect: 1, wetness: 0.5, concrete: '#2a2838',
   },
-  weathers: ['clear', 'rain', 'fog', 'storm'],
+  weathers: ['clear', 'rain', 'storm'],
   defaultWeather: 'clear',
   firstWeather: 'storm',
   billboards: designs(

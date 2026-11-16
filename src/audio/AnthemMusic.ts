@@ -115,6 +115,9 @@ export class AnthemPlayer {
   private timer: number | null = null;
   private step = 0;
   private nextTime = 0;
+  private origin = 0;
+  get bpm(): number { return this.song.bpm; }
+  beatAt(now: number): number { return ((now - this.origin) * this.song.bpm) / 60; }
 
   constructor(private readonly ctx: AudioContext, out: AudioNode, private readonly song: AnthemDef) {
     const c = ctx;
@@ -167,6 +170,7 @@ export class AnthemPlayer {
     this.bus.gain.setValueAtTime(0, t);
     this.bus.gain.linearRampToValueAtTime(0.9, t + 1.5);
     this.nextTime = t + 0.1;
+    this.origin = this.nextTime;
     this.timer = window.setInterval(() => this.schedule(), 25);
   }
 

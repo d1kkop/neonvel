@@ -24,9 +24,9 @@ interface WeatherMod {
 
 export const WEATHER_PRESETS: Record<WeatherName, WeatherMod> = {
   clear: { rain: 0, clouds: 0, fogMul: 1, overcast: 0, hazeTopAdd: 0, beam: 0.18, lightning: 0, mist: 0 },
-  rain: { rain: 0.75, clouds: 0.85, fogMul: 1.9, overcast: 0.6, hazeTopAdd: 30, beam: 0.6, lightning: 0, mist: 0.25 },
+  rain: { rain: 0.75, clouds: 0.85, fogMul: 1.9, overcast: 0.6, hazeTopAdd: 30, beam: 0.6, lightning: 0, mist: 0 },
   fog: { rain: 0, clouds: 0.5, fogMul: 2.0, overcast: 0.7, hazeTopAdd: 60, beam: 1.6, lightning: 0, mist: 1 },
-  storm: { rain: 1, clouds: 1, fogMul: 2.3, overcast: 0.8, hazeTopAdd: 60, beam: 0.85, lightning: 1, mist: 0.35 },
+  storm: { rain: 1, clouds: 1, fogMul: 2.3, overcast: 0.8, hazeTopAdd: 60, beam: 0.85, lightning: 1, mist: 0 },
 };
 
 export interface WeatherTargets {

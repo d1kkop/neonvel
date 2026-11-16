@@ -10,6 +10,10 @@ export interface MinimapCar {
   player: boolean;
   /** Track-distance gap to the player in metres (+ ahead). */
   gap: number;
+  /** Small dot, hidden when out of range (traffic). */
+  minor?: boolean;
+  /** Pinned to the rim when out of range, but without a gap label (police). */
+  noLabel?: boolean;
 }
 
 const RANGE = 230; // metres from the centre to the rim
@@ -111,6 +115,7 @@ export class Minimap {
       const d = Math.hypot(dx, dy);
       const rim = R - S * 0.06;
       const clamped = d > rim;
+      if (clamped && c.minor) continue;
       if (clamped) {
         mx = R + (dx / d) * rim;
         my = R + (dy / d) * rim;
@@ -120,13 +125,13 @@ export class Minimap {
       g.shadowColor = c.color;
       g.shadowBlur = 6;
       g.beginPath();
-      g.arc(mx, my, S * 0.032, 0, Math.PI * 2);
+      g.arc(mx, my, S * (c.minor ? 0.02 : 0.032), 0, Math.PI * 2);
       if (clamped) {
         g.lineWidth = 2;
         g.stroke();
       } else g.fill();
       g.shadowBlur = 0;
-      if (clamped) {
+      if (clamped && !c.noLabel) {
         // Gap label, nudged inward from the rim.
         const lx = R + (dx / d) * (rim - S * 0.11), ly = R + (dy / d) * (rim - S * 0.11);
         g.fillStyle = 'rgba(255, 255, 255, 0.9)';

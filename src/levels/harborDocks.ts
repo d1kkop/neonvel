@@ -17,6 +17,7 @@ export const harborDocks: LevelDef = {
   track: {
     points: [[0, 0], [350, 0], [700, 60], [900, -100], [1150, 0], [1150, 300], [900, 420], [500, 380], [200, 500], [-150, 420], [-250, 180]],
     length: 3000, height: 16, width: 18, lanes: 4, pillars: true,
+    hills: [[2, 6, 0.4], [6, 2.2, 1.3]], // the dock highway climbs and dips over the quays
     sections: [
       { type: 'canopy', start: 300, end: 460 },
       { type: 'tunnel', start: 1700, end: 1880 },
@@ -36,8 +37,8 @@ export const harborDocks: LevelDef = {
     lampsOn: true, leftNeon: '#ffb000', rightNeon: '#00e5ff', leftLamp: '#ffae5c', rightLamp: '#ffae5c',
     neonIntensity: 0.8, asphalt: '#2a2a30', reflect: 0.9, wetness: 0.6, concrete: '#3a3a44',
   },
-  weathers: ['clear', 'rain', 'fog', 'storm'],
-  defaultWeather: 'fog',
+  weathers: ['clear', 'rain', 'storm'],
+  defaultWeather: 'rain',
   billboards: designs('turboCola', 'bikiniBar', 'palmFm', 'synthFm', 'driveFast', 'tropicNights', 'hotelParadise', 'overdrive', 'miamiHeat', 'neonNights'),
   ambience: 'harbor',
   music: 'neon-drive',
@@ -83,7 +84,7 @@ export const harborDocks: LevelDef = {
         const px = frame.position.x + frame.right.x * probe, pz = frame.position.z + frame.right.z * probe;
         if (insideTrack(track, px, pz)) continue;
         const yaw = Math.atan2(frame.right.x * side, frame.right.z * side);
-        if (rng.chance(0.55)) cranes.push({ x: frame.position.x + frame.right.x * side * 34, y: 3, z: frame.position.z + frame.right.z * side * 34, yaw });
+        if (rng.chance(0.6)) cranes.push({ x: frame.position.x + frame.right.x * side * 46, y: 3, z: frame.position.z + frame.right.z * side * 46, yaw });
         if (rng.chance(0.3)) ships.push({ x: frame.position.x + frame.right.x * side * 110, y: 0, z: frame.position.z + frame.right.z * side * 110, yaw: yaw + Math.PI / 2 });
       }
     }
