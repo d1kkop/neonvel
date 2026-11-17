@@ -86,6 +86,24 @@ export class GaragePreview {
     const h = this.canvas.clientHeight || 360;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
+    this.frame();
+  }
+
+  /** Car length being shown: long vehicles (the bus) get a camera pulled back and a wider lens. */
+  private fitLength = 4.6;
+  private frame(): void {
+    const L = this.fitLength;
+    const k = Math.max(1, L / 4.8);
+    // Pull back (the backdrop ring sits at ~13.8 m, so stay well inside it), then widen the lens until the whole
+    // length fits across the view, whichever way the turntable points.
+    const dist = 8.0 * Math.min(k, 1.45);
+    const height = 1.9 * Math.min(k, 1.6);
+    this.camera.position.set(0, height, dist);
+    this.camera.lookAt(0, 0.55 * Math.min(k, 2), 0);
+    const halfW = L * 0.58 + 0.4;
+    const hf = Math.atan(halfW / (dist - L * 0.25));
+    const vfov = (2 * Math.atan(Math.tan(hf) / Math.max(0.5, this.camera.aspect)) * 180) / Math.PI;
+    this.camera.fov = Math.min(70, Math.max(32, vfov));
     this.camera.updateProjectionMatrix();
   }
 
@@ -100,6 +118,11 @@ export class GaragePreview {
     }
     this.car = buildCar({ style: model.style, paint, accent: model.accent, tier: model.tier });
     this.turntable.add(this.car.group);
+    const L = this.car.style.length;
+    const sc = L > 6 ? 5.4 / L : 1;
+    this.car.group.scale.setScalar(sc);
+    this.fitLength = L * sc;
+    this.frame();
   }
 
   dispose(): void {

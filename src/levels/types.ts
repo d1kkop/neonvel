@@ -21,6 +21,8 @@ export interface SkyParams {
   dayClouds: number;
   /** 0..1: tint the daytime clouds with the horizon / sun colours (sunsets). */
   cloudTint?: number;
+  /** Sun corona strength (1 = default; bigger = wider, brighter halo). */
+  sunGlow?: number;
   aurora?: number;
   nebula?: number;
   gridHorizon?: number;

@@ -17,6 +17,8 @@ export interface Settings {
   /** Ground fog on/off per level (added on top of any weather). */
   fog: Record<string, boolean>;
   laps: number;
+  /** Laps picked per level in Quick Race (unset = the level's default: 2 top row, 3 below). */
+  lapsByLevel: Record<string, number>;
   /** 'auto' = the level's own ambience, otherwise a fixed ambience kind (or 'none'). */
   ambience: string;
   /** 'auto' = level track, 'shuffle', or a fixed track id. */
@@ -26,7 +28,7 @@ export interface Settings {
   opponents: number;
   /** Quick Race game mode. */
   mode: 'race' | 'highway' | 'heat';
-  /** VHS look (scanlines, tape wobble) + REWIND in races. */
+  /** VHS look (scanlines, tape wobble). */
   vhs: boolean;
   /** AI opponent strength. */
   difficulty: AiDifficulty;
@@ -53,6 +55,7 @@ const DEFAULTS: Settings = {
   weather: {},
   fog: {},
   laps: 3,
+  lapsByLevel: {},
   ambience: 'auto',
   music: 'auto',
   driveMode: 'grip',

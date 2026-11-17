@@ -12,6 +12,7 @@ export class Sky {
     uSunColorB: { value: new THREE.Color('#ff2a9a') },
     uSunSize: { value: 0.16 },
     uSunIntensity: { value: 2.2 },
+    uSunGlow: { value: 1 },
     uClouds: { value: 0 },
     uFlash: { value: 0 },
     uStars: { value: 1 },
@@ -41,7 +42,7 @@ export class Sky {
         uniform vec3 uMistColor;
         uniform float uMist;
         uniform vec3 uTop, uMid, uHorizon, uFogColor, uHazeColor, uSunColorA, uSunColorB, uMoonDir;
-        uniform float uSunSize, uSunIntensity, uTime, uClouds, uFlash, uStars, uSunStripes, uDayClouds, uAurora, uNebula, uGridHorizon, uCloudTint;
+        uniform float uSunSize, uSunIntensity, uSunGlow, uTime, uClouds, uFlash, uStars, uSunStripes, uDayClouds, uAurora, uNebula, uGridHorizon, uCloudTint;
         varying vec3 vWorld;
         ${NOISE_GLSL}
         void main() {
@@ -71,6 +72,7 @@ export class Sky {
           vec3 sx = normalize(cross(vec3(0.0, 1.0, 0.0), sd));
           vec3 sy = cross(sd, sx);
           float facing = dot(dir, sd);
+          float sunMask = 0.0; // the disc shows through the horizon haze below (a setting sun stays its own colour)
           if (facing > 0.0) {
             vec2 p = vec2(dot(dir, sx), dot(dir, sy)) / uSunSize;
             float r = length(p);
@@ -83,8 +85,13 @@ export class Sky {
             float cut = (p.y < 0.15 && uSunStripes > 0.5) ? step(thick, band) : 1.0;
             float sunVis = 1.0 - uClouds * 0.85;
             col = mix(col, sunCol * uSunIntensity, disc * cut * sunVis);
+            sunMask = disc * cut * sunVis;
             // Glow halo.
-            col += uSunColorB * 0.35 * sunVis * exp(-max(r - 1.0, 0.0) * 2.2) * (1.0 - disc * cut);
+            // Glow halo; sunGlow > 1 adds a wide corona plus a tight bright rim (a glowing sun without pushing the disc
+            // so bright that the filmic tone mapping bleaches it to orange).
+            float rr = max(r - 1.0, 0.0);
+            float halo = 0.35 * uSunGlow * exp(-rr * (2.2 / max(uSunGlow, 1.0))) + 0.55 * max(uSunGlow - 1.0, 0.0) * exp(-rr * 7.0);
+            col += mix(uSunColorB, uSunColorA, 0.5) * halo * sunVis * (1.0 - disc * cut);
           }
 
           // Space nebula: coloured fbm clouds all around (space continues below the horizon).
@@ -145,7 +152,7 @@ export class Sky {
           col += vec3(0.5, 0.55, 0.8) * uFlash * 0.12;
 
           // Blend toward fog colour near/below horizon so distant city melts into sky.
-          col = mix(col, uFogColor, smoothstep(0.12, 0.0, abs(y)) * 0.35);
+          col = mix(col, uFogColor, smoothstep(0.12, 0.0, abs(y)) * 0.35 * (1.0 - sunMask * 0.9));
           gl_FragColor = vec4(col, 1.0);
         }`,
     });
@@ -155,7 +162,7 @@ export class Sky {
   }
 
   /** Apply a level's sky parameters. */
-  configure(p: { top: string; mid: string; horizon: string; sunA: string; sunB: string; sunSize: number; sunIntensity: number; sunStripes: number; stars: number; dayClouds: number; aurora?: number; nebula?: number; gridHorizon?: number; cloudTint?: number }): void {
+  configure(p: { top: string; mid: string; horizon: string; sunA: string; sunB: string; sunSize: number; sunIntensity: number; sunStripes: number; stars: number; dayClouds: number; aurora?: number; nebula?: number; gridHorizon?: number; cloudTint?: number; sunGlow?: number }): void {
     const u = this.uniforms;
     u.uTop.value.set(p.top);
     u.uMid.value.set(p.mid);
@@ -164,6 +171,8 @@ export class Sky {
     u.uSunColorB.value.set(p.sunB);
     u.uSunSize.value = p.sunSize;
     u.uSunIntensity.value = p.sunIntensity;
+    u.uSunGlow.value = p.sunGlow ?? 1;
+    this.setGlow(p.sunGlow ?? 1, p.sunSize, p.sunA, p.sunB);
     u.uSunStripes.value = p.sunStripes;
     u.uStars.value = p.stars;
     u.uCloudTint.value = p.cloudTint ?? 0;
@@ -173,7 +182,45 @@ export class Sky {
     u.uGridHorizon.value = p.gridHorizon ?? 0;
   }
 
+  /**
+   * Bloom-style sun glow (sunGlow > 1): a soft additive halo drawn over the scene at the sun, so the light bleeds
+   * over the palms / cars in front of it like the bloom around a street lamp. Real bloom needs a disc so bright that
+   * the filmic tone mapping bleaches a red sun to yellow; this keeps it red.
+   */
+  private glow: THREE.Sprite | null = null;
+  private setGlow(strength: number, sunSize: number, a: string, b: string): void {
+    if (strength <= 1) { if (this.glow) this.glow.visible = false; return; }
+    if (!this.glow) {
+      const c = document.createElement('canvas');
+      c.width = c.height = 256;
+      const g = c.getContext('2d')!;
+      const img = g.createImageData(256, 256);
+      for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+        const r = Math.hypot(x - 127.5, y - 127.5) / 128;
+        // Bright shoulder just outside the disc (r = 1/3.2), long soft tail.
+        const v = r >= 1 ? 0 : Math.min(1, Math.exp(-Math.max(r - 0.3, 0) * 7) * 0.85 + Math.exp(-r * 2.6) * 0.35) * (1 - r * r);
+        img.data.set([255, 255, 255, Math.round(v * 255)], (y * 256 + x) * 4);
+      }
+      g.putImageData(img, 0, 0);
+      const tex = new THREE.CanvasTexture(c);
+      this.glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, fog: false }));
+      this.glow.renderOrder = 900;
+      this.glow.frustumCulled = false;
+      this.mesh.add(this.glow);
+    }
+    const m = this.glow.material as THREE.SpriteMaterial;
+    m.color.set(a).lerp(new THREE.Color(b), 0.4).multiplyScalar(0.55 * strength);
+    // Sky radius 5000: put the halo at 4000 m; the disc there is 4000 * sunSize wide (radius), the halo ~3.2x that.
+    this.glow.scale.setScalar(4000 * sunSize * 2 * 3.2);
+    this.glow.visible = true;
+  }
+
   update(camera: THREE.Camera): void {
     this.mesh.position.copy(camera.position);
+    if (this.glow?.visible) {
+      this.glow.position.copy(atmosphere.uMoonDir.value).normalize().multiplyScalar(4000);
+      // Storm clouds hide the sun: the glow goes with it.
+      (this.glow.material as THREE.SpriteMaterial).opacity = 1 - (this.uniforms.uClouds.value as number) * 0.85;
+    }
   }
 }

@@ -19,15 +19,23 @@ const TRAIL = 30; // points per trail
 interface State {
   k: number;
   flames: THREE.Mesh[];
+  /** This car's flame material (shared program): its uBurst drives the ignition size / colour. */
+  flameMat: THREE.ShaderMaterial | null;
+  /** Seconds since the boost started (large = no ignition running). */
+  bt: number;
+  wasOn: boolean;
   glow: THREE.Sprite;
   trails: { pos: THREE.BufferAttribute; alpha: THREE.BufferAttribute; pts: THREE.Vector3[]; side: THREE.Vector3[]; ks: number[]; mesh: THREE.Mesh }[];
 }
 
-const THEMES: Record<BoostTheme, { core: string; edge: string; trail: string; glow: string }> = {
-  fire: { core: '#ffffff', edge: '#2a8cff', trail: '#5cc8ff', glow: '#7fc8ff' },
-  plasma: { core: '#ffe8ff', edge: '#c030ff', trail: '#ff50f0', glow: '#d070ff' },
-  bubbles: { core: '#e0ffff', edge: '#40d0ff', trail: '#60e8ff', glow: '#60d8ff' },
+const THEMES: Record<BoostTheme, { core: string; edge: string; trail: string; glow: string; burstCore: string; burstEdge: string }> = {
+  fire: { core: '#ffffff', edge: '#2a8cff', trail: '#5cc8ff', glow: '#7fc8ff', burstCore: '#5f8dff', burstEdge: '#0c22c8' },
+  plasma: { core: '#ffe8ff', edge: '#c030ff', trail: '#ff50f0', glow: '#d070ff', burstCore: '#e27bff', burstEdge: '#5200b8' },
+  bubbles: { core: '#e0ffff', edge: '#40d0ff', trail: '#60e8ff', glow: '#60d8ff', burstCore: '#e0ffff', burstEdge: '#40d0ff' },
 };
+/** Ignition: the exhaust flames flare to 2.5x their size in a darker, fiery blue, then settle over this time. */
+const BURST_TIME = 0.55;
+const BURST_SCALE = 2.5;
 
 export class BoostFX {
   readonly group = new THREE.Group();
@@ -46,7 +54,11 @@ export class BoostFX {
     this.flameGeo = new THREE.ConeGeometry(0.05, 1, 14, 1, true).rotateX(Math.PI / 2).translate(0, 0, 0.5);
     this.flameMat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
-      uniforms: { uTime: { value: 0 }, uCore: { value: new THREE.Color(T.core) }, uEdge: { value: new THREE.Color(T.edge) } },
+      uniforms: {
+        uTime: { value: 0 }, uBurst: { value: 0 },
+        uCore: { value: new THREE.Color(T.core) }, uEdge: { value: new THREE.Color(T.edge) },
+        uBurstCore: { value: new THREE.Color(T.burstCore) }, uBurstEdge: { value: new THREE.Color(T.burstEdge) },
+      },
       vertexShader: /* glsl */ `
         varying float vL; varying vec3 vN; varying vec3 vV;
         void main() {
@@ -57,12 +69,15 @@ export class BoostFX {
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: /* glsl */ `
-        uniform float uTime; uniform vec3 uCore, uEdge;
+        uniform float uTime, uBurst; uniform vec3 uCore, uEdge, uBurstCore, uBurstEdge;
         varying float vL; varying vec3 vN; varying vec3 vV;
         void main() {
           float facing = abs(dot(normalize(vN), normalize(vV)));
           float flick = 0.75 + 0.25 * sin(uTime * 60.0 + vL * 14.0);
-          vec3 col = mix(uCore * 3.0, uEdge * 2.2, smoothstep(0.0, 0.55, vL));
+          // On ignition (uBurst 1 -> 0) the flame is a darker, fiery blue instead of blue-white.
+          vec3 core = mix(uCore * 3.0, uBurstCore * 2.6, uBurst);
+          vec3 edge = mix(uEdge * 2.2, uBurstEdge * 2.4, uBurst);
+          vec3 col = mix(core, edge, smoothstep(0.0, mix(0.55, 0.3, uBurst), vL));
           float a = (1.0 - vL) * (0.35 + 0.65 * facing) * flick;
           gl_FragColor = vec4(col * a, a);
         }`,
@@ -90,8 +105,9 @@ export class BoostFX {
   }
 
   private create(c: BoostCar): State {
-    const flames = this.theme === 'bubbles' ? [] : c.car.exhausts.map((e) => {
-      const m = new THREE.Mesh(this.flameGeo, this.flameMat);
+    const flameMat = this.theme === 'bubbles' ? null : this.flameMat.clone();
+    const flames = !flameMat ? [] : c.car.exhausts.map((e) => {
+      const m = new THREE.Mesh(this.flameGeo, flameMat);
       m.position.copy(e);
       m.visible = false;
       m.renderOrder = 7;
@@ -122,7 +138,7 @@ export class BoostFX {
       this.group.add(mesh);
       return { pos, alpha, pts: [] as THREE.Vector3[], side: [] as THREE.Vector3[], ks: [] as number[], mesh };
     });
-    const s: State = { k: 0, flames, glow, trails };
+    const s: State = { k: 0, flames, flameMat, bt: 99, wasOn: false, glow, trails };
     this.state.set(c, s);
     return s;
   }
@@ -130,21 +146,31 @@ export class BoostFX {
   /** `mist` 0..1: the glow behind a boosting car grows and brightens in fog / mist. */
   update(dt: number, cars: BoostCar[], mist: number): void {
     this.time += dt;
-    this.flameMat.uniforms.uTime.value = this.time;
+
     for (const c of cars) {
       if (!c.car.exhausts) continue;
       const s = this.state.get(c) ?? this.create(c);
       const on = c.phys.boosting && !c.left && c.car.group.visible;
       s.k += ((on ? 1 : 0) - s.k) * Math.min(1, dt * (on ? 10 : 4));
       const k = s.k;
+      // Ignition: the flames flare up to BURST_SCALE x within ~60 ms, then settle over BURST_TIME.
+      if (on && !s.wasOn) s.bt = 0;
+      s.wasOn = on;
+      s.bt += dt;
+      const bk = s.bt < BURST_TIME ? Math.min(1, s.bt / 0.06) * Math.pow(1 - s.bt / BURST_TIME, 1.4) : 0;
+      const big = 1 + (BURST_SCALE - 1) * bk;
+      if (s.flameMat) {
+        s.flameMat.uniforms.uTime.value = this.time;
+        s.flameMat.uniforms.uBurst.value = bk;
+      }
       for (const f of s.flames) {
         f.visible = k > 0.02;
-        if (f.visible) f.scale.set(1, 1, k * (0.9 + Math.random() * 0.4));
+        if (f.visible) f.scale.set(big, big, k * big * (0.9 + Math.random() * 0.4));
       }
       const gm = s.glow.material as THREE.SpriteMaterial;
-      s.glow.visible = k > 0.02;
-      gm.opacity = k * (0.1 + mist * 0.28);
-      s.glow.scale.setScalar(1.8 + mist * 3 + Math.random() * 0.25);
+      s.glow.visible = k > 0.02 || bk > 0.01;
+      gm.opacity = k * (0.1 + mist * 0.28) + bk * 0.12;
+      s.glow.scale.setScalar(1.8 + mist * 3 + bk * 1.2 + Math.random() * 0.25);
       // Light trails from the tail lights (world space; they stay behind as the car moves on).
       const g = c.car.group;
       this.right.set(1, 0, 0).applyQuaternion(g.quaternion);

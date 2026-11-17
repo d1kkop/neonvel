@@ -5,7 +5,8 @@ import { AudioEngine } from '../audio/AudioEngine';
 import { GameLoop } from '../core/GameLoop';
 import { ChaseCamera } from '../game/ChaseCamera';
 import { World } from '../game/World';
-import { AI_DIFFICULTY, type CarPhys } from '../game/CarPhysics';
+import { AI_DIFFICULTY } from '../game/CarPhysics';
+import { defaultLaps } from '../game/laps';
 import { preloadCarModels } from '../game/car/carModels';
 import { type GameMode, HeatMode, HighwayMode } from '../game/modes';
 import { levelById } from '../levels';
@@ -140,7 +141,6 @@ export class App {
       if (e.code === 'KeyC' && this.state !== 'menu') this.freeCam = !this.freeCam;
     });
     window.addEventListener('resize', () => this.onResize());
-    window.addEventListener('keydown', (e) => { if (e.code === 'KeyR' && !(e.target instanceof HTMLInputElement)) this.tryRewind(); });
     // First user gesture unlocks audio (browser rule) and reveals the menu buttons.
     const unlock = () => {
       this.menu.unlockStart();
@@ -329,10 +329,7 @@ export class App {
       }
       this.compiling = false;
       if (this.world !== w) return;
-      this.laps = modeId === 'race' ? this.settings.laps : Infinity;
-      this.history.length = 0;
-      this.rewind = null;
-      this.rewindsLeft = 3;
+      this.laps = modeId === 'race' ? (this.settings.lapsByLevel?.[w.level.id] ?? defaultLaps(w.level.id)) : Infinity;
       this.mode = modeId === 'highway' ? new HighwayMode() : modeId === 'heat' ? new HeatMode() : null;
       this.mode?.start(w);
       this.lastLap = 1;
@@ -434,29 +431,6 @@ export class App {
       return;
     }
 
-    // REWIND: play the recorded history backwards (4 snapshots per step = 4× speed), then resume.
-    if (this.rewind) {
-      for (let k = 0; k < 4 && this.history.length > 1; k++) this.history.pop();
-      const snap = this.history[this.history.length - 1];
-      if (snap) {
-        this.raceTime = snap.t;
-        w.cars.forEach((c, i) => {
-          const src = snap.cars[i];
-          if (!src) return;
-          const keepPrev = { ps: c.phys.s, px: c.phys.x, ppsi: c.phys.psi };
-          Object.assign(c.phys, src, keepPrev);
-        });
-      }
-      this.rewind.left -= 4;
-      if (this.rewind.left <= 0 || this.history.length <= 1) {
-        this.rewind = null;
-        this.history.length = 0;
-        this.hud.vcrText('▶ PLAY');
-        for (const c of w.cars) { c.phys.ps = c.phys.s; c.phys.px = c.phys.x; c.phys.ppsi = c.phys.psi; }
-      }
-      return;
-    }
-
     // Racing / finished (after the finish the AI takes over your car).
     this.raceTime += dt;
     const racing = this.state === 'racing';
@@ -475,7 +449,6 @@ export class App {
     const ev = w.step(dt, inp);
     if (p.phys.boosting && !wasBoosting) this.audio.sfx?.boost();
     if (racing) this.beatMoves(p.phys);
-    if (racing && !this.online && !this.mode) this.recordHistory(w);
     if (this.mode && racing) {
       this.mode.update(dt, w, ev);
       for (const pop of this.mode.takePops()) this.hud.beatPop(pop.text, pop.good);
@@ -518,32 +491,9 @@ export class App {
     }
   }
 
-  // ------------------------------------------------------------ VHS rewind
+  // ------------------------------------------------------------ VHS look
 
   private vhsTime = 0;
-  private rewindFx = 0;
-  private rewind: { left: number } | null = null;
-  private rewindsLeft = 3;
-  /** Last ~4 s of every car's physics state (one entry per sim step). */
-  private history: { t: number; cars: CarPhys[] }[] = [];
-
-  private recordHistory(w: World): void {
-    this.history.push({ t: this.raceTime, cars: w.cars.map((c) => ({ ...c.phys })) });
-    if (this.history.length > 60 * 4) this.history.shift();
-  }
-
-  /** R key: rewind ~4 s (normal races only, VHS look on, 3 per race). */
-  private tryRewind(): void {
-    // Never online: the other players' cars can't be rewound (and it would be a cheat in ranked races).
-    if (this.online && this.state === 'racing') { this.hud.vcrText('NO REWIND ONLINE', 1.2); return; }
-    if (this.settings.vhs !== true || this.state !== 'racing' || this.online || this.mode || this.paused || this.rewind) return;
-    if (this.rewindsLeft <= 0) { this.hud.vcrText('NO TAPE LEFT', 1.2); return; }
-    if (this.history.length < 30) return;
-    this.rewindsLeft--;
-    this.rewind = { left: this.history.length };
-    this.hud.vcrText(`◀◀ REW  ${this.rewindsLeft}`, 0);
-    this.audio.sfx?.rewind();
-  }
 
   /** Current game mode (Highway Rush / Heat), null in a normal race. */
   private mode: GameMode | null = null;
@@ -625,8 +575,7 @@ export class App {
     this.hud.setBeat(bd?.pulse ?? 0, !!bd && bd.dist <= App.BEAT_WINDOW);
     w.update(this.paused ? 0 : dt, this.camera, covered);
     this.vhsTime += dt;
-    this.rewindFx += ((this.rewind ? 1 : 0) - this.rewindFx) * Math.min(1, dt * 10);
-    this.renderer.setVhs(this.settings.vhs === true ? 1 : 0, this.rewindFx, this.vhsTime);
+    this.renderer.setVhs(this.settings.vhs === true ? 1 : 0, 0, this.vhsTime);
 
     if (this.state === 'racing' || this.state === 'finished' || this.state === 'countdown') {
       const L = w.track.length;

@@ -5,6 +5,7 @@ import { designs } from '../world/billboardArt';
 import { CoastTerrain, createOcean } from '../world/coast/Coast';
 import { createHotels, createLifeguardTowers, createSeagulls, createUmbrellas, Placement } from '../world/props/BeachProps';
 import { createPalms, PalmPlacement, palmWind } from '../world/props/Palms';
+import { createBeachBars, createPartyLights, LightString } from '../world/props/BeachParty';
 import type { LevelDef } from './types';
 
 const PASTELS = ['#ffb3c7', '#9fe3e0', '#ffe3a3', '#c7b3ff', '#ffc9a3', '#b3ffd1', '#f7f3ea'].map((c) => new THREE.Color(c));
@@ -35,8 +36,8 @@ export const palmCoast: LevelDef = {
   // Sunset: a big red sun sinking into the sea at the end of the start straight, violet sky overhead,
   // long low orange light with a cool purple fill from the sky side.
   sky: {
-    top: '#1c1a52', mid: '#c24e78', horizon: '#ff7a3e', sunA: '#ff3a1c', sunB: '#b00616',
-    sunSize: 0.11, sunIntensity: 1.45, sunStripes: 0, stars: 0.15, dayClouds: 0.6, cloudTint: 1,
+    top: '#1c1a52', mid: '#c24e78', horizon: '#ff7a3e', sunA: '#ff1c08', sunB: '#c00410',
+    sunSize: 0.11, sunIntensity: 1.7, sunGlow: 2.4, sunStripes: 0, stars: 0.15, dayClouds: 0.6, cloudTint: 1,
   },
   atmosphere: {
     fogColor: '#e0846e', fogDensity: 0.0005, hazeColor: '#ff8a5a', hazeTop: 22, hazeStrength: 0.35, overcastColor: '#6a5a6e',
@@ -135,10 +136,81 @@ export const palmCoast: LevelDef = {
       palms.push({ x, y: y - 0.2, z, scale: rng.range(0.7, 1.3), yaw: rng.range(0, Math.PI * 2) });
     }
 
+    // Beach party: party zones (a reed bar in the middle of two rows of poles with festoon lights zigzagging
+    // between them, tiki torches around the bar) spread over the lap, plus extra drinks stands along the beach.
+    const bars: Placement[] = [];
+    const poles: Placement[] = [];
+    const strings: LightString[] = [];
+    const torches: Placement[] = [];
+    const beachSide = (d: number): number => {
+      track.frameAt(d, frame);
+      for (const side of [-1, 1]) {
+        const probe = side * (hw + 40);
+        if (!terrain.inside(frame.position.x + frame.right.x * probe, frame.position.z + frame.right.z * probe)) return side;
+      }
+      return 0;
+    };
+    const at = (d: number, lat: number, out = new THREE.Vector3()) => {
+      track.frameAt(d, frame);
+      out.set(frame.position.x + frame.right.x * lat, 0, frame.position.z + frame.right.z * lat);
+      out.y = terrain.heightAt(out.x, out.z);
+      return out;
+    };
+    const addBar = (d: number, side: number, lat: number) => {
+      const p = at(d, side * lat);
+      if (p.y < 0.5) return null;
+      track.frameAt(d, frame);
+      bars.push({ x: p.x, y: p.y - 0.05, z: p.z, yaw: Math.atan2(-frame.right.x * side, -frame.right.z * side), scale: rng.range(1.0, 1.15) });
+      return p;
+    };
+    const zones = 5;
+    for (let k = 0; k < zones; k++) {
+      let d = (k + 0.35) * (track.length / zones);
+      let side = 0;
+      for (let tries = 0; tries < 12 && (!(side = beachSide(d)) || track.sectionAt(d, 80)); tries++) d += 37;
+      if (!side) continue;
+      const bar = addBar(d, side, hw + 31);
+      if (!bar) continue;
+      for (let i = 0; i < 7; i++) {
+        const a = (i / 7) * Math.PI * 2;
+        const x = bar.x + Math.cos(a) * 6.5, z = bar.z + Math.sin(a) * 6.5;
+        const y = terrain.heightAt(x, z);
+        if (y > 0.4) torches.push({ x, y, z, yaw: 0 });
+      }
+      const rows: (THREE.Vector3 | null)[][] = [[], []];
+      for (let i = -4; i <= 4; i++) {
+        [hw + 17, hw + 45].forEach((lat, r) => {
+          const p = at(d + i * 14 + (r ? 7 : 0), side * lat);
+          if (p.y < 0.45 || (Math.abs(i) < 1 && r === 0 && Math.hypot(p.x - bar.x, p.z - bar.z) < 6)) { rows[r].push(null); return; }
+          poles.push({ x: p.x, y: p.y - 0.1, z: p.z, yaw: rng.range(0, Math.PI) });
+          rows[r].push(new THREE.Vector3(p.x, p.y + 3.95, p.z));
+        });
+      }
+      for (let i = 0; i < rows[0].length; i++) {
+        const a = rows[0][i], b = rows[1][i], a2 = rows[0][i + 1];
+        if (a && b) strings.push({ a, b, sag: 1.1 });
+        if (b && a2) strings.push({ a: b, b: a2, sag: 1.1 });
+        if (a && a2) strings.push({ a, b: a2, sag: 0.6 });
+      }
+      // Clear the umbrellas from the dance floor.
+      for (let i = umbrellas.length - 1; i >= 0; i--) if (Math.hypot(umbrellas[i].x - bar.x, umbrellas[i].z - bar.z) < 40) umbrellas.splice(i, 1);
+    }
+    // Extra drinks stands between the zones.
+    for (let k = 0; k < 9; k++) {
+      const d = rng.range(0, track.length);
+      const side = beachSide(d);
+      if (!side || track.sectionAt(d, 20)) continue;
+      const p = at(d, side * (hw + rng.range(24, 40)));
+      if (bars.some((b) => Math.hypot(b.x - p.x, b.z - p.z) < 120)) continue;
+      addBar(d, side, Math.hypot(p.x - at(d, 0).x, p.z - at(d, 0).z));
+    }
+
     palmWind.uWindStrength.value = 1.35; // it's windy at the coast
     scene.add(createPalms(palms));
     if (umbrellas.length) scene.add(createUmbrellas(umbrellas));
     if (towers.length) scene.add(createLifeguardTowers(towers));
+    if (bars.length) scene.add(createBeachBars(bars));
+    if (poles.length || torches.length) scene.add(createPartyLights(poles, strings, torches));
     if (hotels.length) scene.add(createHotels(hotels));
     const gulls: THREE.Vector3[] = [];
     for (let i = 0; i < 36; i++) {

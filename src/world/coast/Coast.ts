@@ -202,7 +202,10 @@ export class CoastTerrain {
         void main() {
           vec2 p = vWorld.xz;
           float y = vWorld.y;
-          float foot = max(sqrt(length(dFdx(p)) * length(dFdy(p))) * 1.3, 1e-4); // metres per pixel (area mean: the long axis is stretched at grazing angles)
+          // Metres per pixel: area mean close by (keeps fine detail at grazing angles near the car), blending to the
+          // long axis with distance (there the stretched axis is what aliases).
+          float fa = length(dFdx(p)), fb = length(dFdy(p));
+          float foot = max(mix(sqrt(fa * fb) * 1.3, max(fa, fb), smoothstep(15.0, 60.0, length(cameraPosition - vWorld))), 1e-4);
           vec3 n0 = normalize(vNormal);
           float n = fbm(p * 0.05);
 
@@ -215,7 +218,7 @@ export class CoastTerrain {
           sand *= 0.9 + 0.2 * ripple;
           sand *= 1.0 + 0.1 * (vnoise(p * 3.0) - 0.5) * lod(foot, 3.0) + 0.1 * (vnoise(p * 11.0) - 0.5) * lod(foot, 11.0);
           sand *= 0.86 + 0.24 * fbm(p * 0.25);           // metre-scale tone drift (stays visible far away)
-          sand *= 0.92 + 0.16 * vnoise(p * 1.3 + 4.0);
+          sand *= 0.92 + 0.16 * mix(0.5, vnoise(p * 1.3 + 4.0), lod(foot, 1.3));
           sand *= 1.0 + 0.14 * (vnoise(p * 6.0 + 1.1) - 0.5) * lod(foot, 6.0) + 0.12 * (vnoise(p * 15.0 + 5.2) - 0.5) * lod(foot, 15.0);
           float g1 = vnoise(p * 48.0), g2 = vnoise(p * 130.0 + 7.0);
           sand *= mix(1.0, 0.7 + 0.45 * g1, lod(foot, 48.0));
@@ -266,18 +269,24 @@ export class CoastTerrain {
           col = mix(col, uWetSand * (0.92 + 0.12 * fbm(p * 0.3)), wet);
           h *= 1.0 - wet * 0.8; // wet sand is smooth
           float wash = sin(vWorld.x * 0.05 + vWorld.z * 0.04 - uTime * 0.9) * 0.25 + 0.25;
-          float foam = smoothstep(0.12, 0.0, abs(y - wash)) * (0.6 + 0.4 * vnoise(p * 2.0 + uTime));
+          // Foam line: never thinner than ~1.5 px (a sub-pixel band flickers far away), fading as it widens.
+          float fw = max(0.12, fwidth(y) * 1.5);
+          float foam = smoothstep(fw, 0.0, abs(y - wash)) * (0.6 + 0.4 * mix(0.5, vnoise(p * 2.0 + uTime), lod(foot, 2.0))) * (0.12 / fw);
           col = mix(col, vec3(1.0), foam * 0.8 * step(-0.3, y));
 
           // ---- Lighting: bumped normal, sun + sky/ground ambient, glossy wet sand.
-          vec3 nrm = bump(n0, h, mix(0.12, 0.14, grass));
+          // Bump detail fades once a pixel covers more than ~half a metre (derivative bumps turn to sparkle there).
+          float far = smoothstep(0.15, 1.0, foot);
+          vec3 nrm = bump(n0, h, mix(0.12, 0.14, grass) * (1.0 - far));
           vec3 L = normalize(uMoonDir);
           float diff = max(dot(nrm, L), 0.0);
           vec3 sky = mix(vec3(0.55, 0.65, 0.85), uFogColor, 0.3);
           vec3 amb = mix(vec3(0.35, 0.3, 0.25), sky, nrm.y * 0.5 + 0.5) * 0.55;
           vec3 lit = col * (amb + 0.85 * diff);
           vec3 V = normalize(cameraPosition - vWorld);
-          lit += vec3(1.0, 0.95, 0.85) * pow(max(dot(reflect(-L, nrm), V), 0.0), 80.0) * wet * 0.9;
+          // Wet-sand sheen: a tight glint up close, a broad soft sheen far away (no glitter at the waterline).
+          float shin = mix(80.0, 16.0, far);
+          lit += vec3(1.0, 0.95, 0.85) * pow(max(dot(reflect(-L, nrm), V), 0.0), shin) * wet * mix(0.9, 0.35, far);
           gl_FragColor = vec4(applyAtmos(lit, vWorld), 1.0);
         }`,
     });
@@ -332,16 +341,22 @@ export function createOcean(opts: { deep: string; shallow: string; skyHorizon: s
       varying vec3 vWorld;
       ${ATMOS_PARS}
       ${NOISE_GLSL}
-      vec2 waveGrad(vec2 p, float t) {
+      // Wave slope; ws = weight of the small chop (faded out where a pixel covers several metres: no aliasing).
+      vec2 waveGrad(vec2 p, float t, float ws) {
         float e = 0.6;
-        float h0 = fbm(p * 0.08 + vec2(t * 0.05, t * 0.03)) + 0.5 * vnoise(p * 0.35 - vec2(t * 0.2, 0.0));
-        float hx = fbm((p + vec2(e, 0.0)) * 0.08 + vec2(t * 0.05, t * 0.03)) + 0.5 * vnoise((p + vec2(e, 0.0)) * 0.35 - vec2(t * 0.2, 0.0));
-        float hz = fbm((p + vec2(0.0, e)) * 0.08 + vec2(t * 0.05, t * 0.03)) + 0.5 * vnoise((p + vec2(0.0, e)) * 0.35 - vec2(t * 0.2, 0.0));
+        float h0 = fbm(p * 0.08 + vec2(t * 0.05, t * 0.03)) + 0.5 * ws * vnoise(p * 0.35 - vec2(t * 0.2, 0.0));
+        float hx = fbm((p + vec2(e, 0.0)) * 0.08 + vec2(t * 0.05, t * 0.03)) + 0.5 * ws * vnoise((p + vec2(e, 0.0)) * 0.35 - vec2(t * 0.2, 0.0));
+        float hz = fbm((p + vec2(0.0, e)) * 0.08 + vec2(t * 0.05, t * 0.03)) + 0.5 * ws * vnoise((p + vec2(0.0, e)) * 0.35 - vec2(t * 0.2, 0.0));
         return vec2(hx - h0, hz - h0) / e;
       }
       void main() {
         float dist = length(cameraPosition - vWorld);
-        vec2 g = waveGrad(vWorld.xz, uTime) * (1.0 / (1.0 + dist / 300.0));
+        // Pixel footprint in metres (area mean, so grazing angles don't over-blur).
+        float fa = length(dFdx(vWorld.xz)), fb = length(dFdy(vWorld.xz));
+        float foot = max(mix(sqrt(fa * fb) * 1.3, max(fa, fb), smoothstep(15.0, 60.0, dist)), 1e-3);
+        float ws = 1.0 - smoothstep(0.4, 1.4, foot * 0.35 * 4.0);   // small chop (0.35 c/m)
+        float wb = 1.0 - smoothstep(0.5, 1.6, foot * 0.6);          // fbm's finest octaves
+        vec2 g = waveGrad(vWorld.xz, uTime, ws) * (1.0 / (1.0 + dist / 300.0)) * mix(0.35, 1.0, wb);
         vec3 n = normalize(vec3(-g.x * 3.0, 1.0, -g.y * 3.0));
         vec3 v = normalize(cameraPosition - vWorld);
         float fres = pow(clamp(1.0 - dot(n, v), 0.0, 1.0), 4.0);

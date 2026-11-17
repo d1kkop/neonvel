@@ -186,7 +186,8 @@ export class Terrain {
           vec3 L = normalize(uMoonDir);
           vec3 V = normalize(cameraPosition - vWorld);
           float dist = length(cameraPosition - vWorld);
-          float px = max(sqrt(length(dFdx(vWorld.xz)) * length(dFdy(vWorld.xz))) * 1.3, 1e-4); // metres per pixel (area mean)
+          float pxa = length(dFdx(vWorld.xz)), pxb = length(dFdy(vWorld.xz));
+          float px = max(mix(sqrt(pxa * pxb) * 1.3, max(pxa, pxb), smoothstep(15.0, 60.0, length(cameraPosition - vWorld))), 1e-4); // metres per pixel: area mean near, long axis far
           #define LAYER(f) (1.0 - smoothstep(0.25, 0.9, (f) * px))
           float sandMask = uSand * (1.0 - smoothstep(uMidAt - 6.0, uMidAt + 6.0, y)) * smoothstep(0.6, 0.85, n.y);
           float panMask = 0.0;

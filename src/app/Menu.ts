@@ -10,6 +10,8 @@ import { CARS, carById, formatPrice, PAINTS } from '../game/car/catalog';
 import { levelItem, levelPrice } from '../game/products';
 import type { StoreMode } from '../net/Store';
 import { GaragePreview } from './GaragePreview';
+import { controlsHtml } from './controlsHelp';
+import { defaultLaps } from '../game/laps';
 import { listTracks, TrackInfo } from '../audio/SynthwaveMusic';
 import { WEATHER_LABELS, WeatherName } from '../world/weather/Weather';
 import { Settings, saveSettings } from './settings';
@@ -181,11 +183,16 @@ export class Menu {
     const fogOn = s.fog?.[level.id] ?? weather0 === 'fog';
     const canFog = false; // fog was removed (it never looked right)
     const levelOwned = (id: string) => levelPrice(id) === 0 || s.ownedCars.includes(levelItem(id));
+    // Level cards: a sequence of in-game shots (public/levels/<id>/0..4.webp) that plays while the card is hovered
+    // or selected; the colour gradient shows until the pictures have loaded.
+    const shots = (id: string) => `<div class="shots">${[0, 1, 2, 3, 4].map((n) =>
+      `<img src="${import.meta.env.BASE_URL}levels/${id}/${n}.webp" alt="" draggable="false" class="${n === 0 ? 'show' : ''}" onerror="this.remove()">`).join('')}</div>`;
     const card = (l: { name: string; tagline: string; cardColors: [string, string] }, id?: string) => `
       <div tabindex="0" class="card ${id === level.id ? 'on' : ''} ${id ? '' : 'locked'} ${id && !levelOwned(id) ? 'paid' : ''}" ${id ? `data-level="${id}"` : ''}
         style="background: linear-gradient(135deg, ${l.cardColors[0]}, ${l.cardColors[1]})">
-        <h3>${esc(l.name)}</h3><p>${esc(l.tagline)}</p>${id ? (levelOwned(id) ? '' : `<span class="badge price">🔒 ${formatPrice(levelPrice(id))}</span>`) : '<span class="badge">COMING SOON</span>'}
+        ${id ? shots(id) : ''}<h3>${esc(l.name)}</h3>${id ? (levelOwned(id) ? '' : `<span class="badge price">🔒 ${formatPrice(levelPrice(id))}</span>`) : '<span class="badge">COMING SOON</span>'}
       </div>`;
+    const laps = s.lapsByLevel?.[level.id] ?? defaultLaps(level.id);
     el.innerHTML = `
       <div class="title">QUICK RACE</div>
       <div class="panel">
@@ -201,7 +208,7 @@ export class Menu {
           <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${(s.mode ?? 'race') === 'race' ? 'Classic race against the AI.' : s.mode === 'highway' ? 'Open road with traffic: near misses score, checkpoints add time — beat the clock.' : 'Police chase: survive 150 s without getting boxed in. The heat keeps rising.'}</span></div>
         ${(s.mode ?? 'race') === 'race' ? '' : '<div style="display:none">'}
         <div class="row"><span class="label">Laps</span>
-          ${[1, 2, 3, 5].map((n) => `<button class="chip ${n === s.laps ? 'on' : ''}" data-laps="${n}">${n}</button>`).join('')}</div>
+          ${[1, 2, 3, 5].map((n) => `<button class="chip ${n === laps ? 'on' : ''}" data-laps="${n}">${n}</button>`).join('')}</div>
         <div class="row"><span class="label">Opponents</span>
           ${[1, 3, 5, 7, 10].map((n) => `<button class="chip ${n === s.opponents ? 'on' : ''}" data-opp="${n}">${n}</button>`).join('')}</div>
         ${(s.mode ?? 'race') === 'race' ? '' : '</div>'}
@@ -236,7 +243,8 @@ export class Menu {
       this.commit(); this.h.sound('select'); this.renderQuick();
     }));
     el.querySelectorAll<HTMLElement>('[data-laps]').forEach((c) => c.addEventListener('click', () => {
-      s.laps = +c.dataset.laps!; this.commit(); this.h.sound('select'); this.renderQuick();
+      s.lapsByLevel ??= {};
+      s.lapsByLevel[level.id] = +c.dataset.laps!; this.commit(); this.h.sound('select'); this.renderQuick();
     }));
     el.querySelectorAll<HTMLElement>('[data-opp]').forEach((c) => c.addEventListener('click', () => {
       s.opponents = +c.dataset.opp!; this.commit(); this.h.sound('select'); this.renderQuick();
@@ -245,6 +253,34 @@ export class Menu {
     el.querySelector('[data-act=back]')!.addEventListener('click', () => this.back());
     el.querySelector('[data-act=start]')?.addEventListener('click', () => this.h.startRace());
     el.querySelector('[data-act=buylevel]')?.addEventListener('click', () => { this.h.sound('select'); this.h.buyItem(levelItem(level.id)); });
+    this.playShots(el);
+  }
+
+  private shotTimer = 0;
+  /** Steps the picture sequence of the hovered / focused / selected level cards (others rest on their first frame). */
+  private playShots(el: HTMLElement): void {
+    clearInterval(this.shotTimer);
+    const cards = [...el.querySelectorAll<HTMLElement>('.card[data-level]')];
+    const frame = new Map<HTMLElement, number>();
+    const setFrame = (c: HTMLElement, n: number) => {
+      const imgs = c.querySelectorAll('.shots img');
+      if (!imgs.length) return;
+      const k = n % imgs.length;
+      frame.set(c, k);
+      imgs.forEach((im, i) => im.classList.toggle('show', i === k));
+    };
+    for (const c of cards) {
+      c.addEventListener('mouseenter', () => { c.dataset.hover = '1'; setFrame(c, (frame.get(c) ?? 0) + 1); });
+      c.addEventListener('mouseleave', () => { delete c.dataset.hover; if (!c.classList.contains('on')) setFrame(c, 0); });
+    }
+    this.shotTimer = window.setInterval(() => {
+      if (!el.isConnected || this.current !== 'quick') { clearInterval(this.shotTimer); return; }
+      // Only one card plays: the hovered one; with nothing hovered, the selected (or keyboard-focused) one.
+      const hovered = cards.find((c) => c.dataset.hover);
+      const focused = cards.find((c) => c === document.activeElement);
+      const playing = hovered ?? focused ?? cards.find((c) => c.classList.contains('on'));
+      for (const c of cards) if (c === playing) setFrame(c, (frame.get(c) ?? 0) + 1);
+    }, 1100);
   }
 
   private preview: GaragePreview | null = null;
@@ -445,7 +481,7 @@ export class Menu {
         <div class="row"><span class="label">VHS look</span>
           <button class="chip ${s.vhs === true ? 'on' : ''}" data-vhs="1">On</button>
           <button class="chip ${s.vhs !== true ? 'on' : ''}" data-vhs="0">Off</button>
-          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">80s videotape picture, and REWIND (R) in Quick Races — 3 per race. Not in Netplay or the Highway / Heat modes.</span></div>
+          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">80s videotape picture: scanlines, tape wobble, colour bleed.</span></div>
         <div class="row"><span class="label">AI level</span>
           ${(['easy', 'normal', 'hard', 'impossible'] as const).map((d) => `<button class="chip ${d === (s.difficulty ?? 'normal') ? 'on' : ''}" data-diff="${d}">${d}</button>`).join('')}</div>
         <div class="row"><span class="label">Graphics</span>
@@ -458,16 +494,24 @@ export class Menu {
       <div class="popup" data-controls hidden>
         <div class="panel popup-panel">
           <div class="hud-small" style="margin-bottom:10px">CONTROLS</div>
-          <div class="controls-list">
-            <b>Keyboard</b>: ↑/W accelerate · ↓/S brake · ←→/A D steer · SPACE handbrake (drift) · ESC pause · C camera<br>
-            <b>Gamepad</b>: RT/A accelerate · LT/B brake · stick/d-pad steer · X/RB handbrake · START pause<br>
-            <b>Touch</b>: drag the circle — up/down = gas/brake, left/right = steer</div>
+          <div class="controls-list" data-controls-list></div>
           <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn small" data-act="close-controls">Close</button></div>
         </div>
       </div>`;
     const pop = el.querySelector<HTMLElement>('[data-controls]')!;
-    el.querySelector('[data-act=controls]')!.addEventListener('click', () => { this.h.sound('select'); pop.hidden = false; });
-    const closePop = () => { this.h.sound('back'); pop.hidden = true; };
+    // The layout follows what is plugged in (keyboard, Xbox or PlayStation pad), refreshed while the popup is open.
+    const list = el.querySelector<HTMLElement>('[data-controls-list]')!;
+    let shown = '';
+    const refresh = () => { const h = controlsHtml(); if (h !== shown) list.innerHTML = shown = h; };
+    let timer = 0;
+    el.querySelector('[data-act=controls]')!.addEventListener('click', () => {
+      this.h.sound('select');
+      pop.hidden = false;
+      refresh();
+      clearInterval(timer);
+      timer = window.setInterval(() => (pop.hidden || !pop.isConnected ? clearInterval(timer) : refresh()), 500);
+    });
+    const closePop = () => { this.h.sound('back'); pop.hidden = true; clearInterval(timer); };
     el.querySelector('[data-act=close-controls]')!.addEventListener('click', closePop);
     pop.addEventListener('click', (e) => { if (e.target === pop) closePop(); });
     el.querySelectorAll<HTMLInputElement>('[data-vol]').forEach((r) => r.addEventListener('input', () => {

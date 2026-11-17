@@ -446,6 +446,9 @@ class Car3(Car2):
                 self.groove(self._side_rays(s, t, p['zb'] + 0.08, p['zg'] - 0.02))
             p = self.P((tf + tr) / 2)
             self.groove(self._sill_rays(s, p['zb'] + 0.1, tf, tr))
+            for t in d.get('door_cuts', []):  # extra shut lines (rear doors of a sedan)
+                p = self.P(t)
+                self.groove(self._side_rays(s, t, p['zb'] + 0.08, p['zg'] - 0.02))
         # Front bonnet panel.
         if d.get('bonnet', True) is not False:
             tn, tb = d.get('bonnet', (0.03, 0.26))

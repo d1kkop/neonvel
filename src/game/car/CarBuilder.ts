@@ -79,43 +79,43 @@ export const CAR_STYLES: Record<string, CarStyle> = {
     archSquare: 5,
     features: ['hoodScoop', 'chromeBumpers', 'vinylRoof'],
   },
-  /** 70s fastback coupé: the soft one of the bunch, rear wheels behind skirts. */
+  /** Mid-80s two-seat kammback: low wedge nose, flush lamps, long sloping glass hatch, chopped tail. */
   coupe: {
     name: 'coupe',
-    rim: 'spokes',
-    length: 4.4,
-    width: 1.86,
-    body: [[0.0, 0.5, 0.28, 0.7], [0.05, 0.62, 0.23, 0.9], [0.28, 0.72, 0.21, 0.98], [0.55, 0.82, 0.21, 1.0], [0.88, 0.84, 0.23, 0.97], [1.0, 0.72, 0.32, 0.8]],
-    bodyExp: 4.5,
-    bodyTumble: 0.14,
-    cabin: [[0.3, 0.74, 0.7, 0.78], [0.42, 1.08, 0.73, 0.74], [0.58, 1.12, 0.76, 0.7], [0.8, 0.96, 0.78, 0.64], [0.96, 0.8, 0.78, 0.5]],
-    cabinExp: 4.5,
-    cabinTumble: 0.24,
-    wheelRadius: 0.34,
-    wheelT: [0.19, 0.79],
+    rim: 'dish',
+    length: 3.9,
+    width: 1.74,
+    body: [[0.0, 0.5, 0.24, 0.9], [0.04, 0.58, 0.21, 0.97], [0.3, 0.68, 0.2, 1.0], [0.9, 0.78, 0.21, 1.0], [1.0, 0.76, 0.28, 0.97]],
+    bodyExp: 10,
+    bodyTumble: 0.06,
+    cabin: [[0.3, 0.68, 0.66, 0.8], [0.46, 1.06, 0.7, 0.76], [0.6, 1.06, 0.72, 0.74], [0.9, 0.84, 0.76, 0.72], [0.93, 0.78, 0.76, 0.7]],
+    cabinExp: 8,
+    cabinTumble: 0.18,
+    wheelRadius: 0.31,
+    wheelT: [0.17, 0.79],
     strakes: false,
     spoiler: 'none',
-    facet: 0.15,
-    features: ['rearSkirt', 'chromeTrim'],
+    archSquare: 3,
+    features: [],
   },
-  /** Short, tall rally hot hatch: a box with a square tailgate, bolted-on flares, roof spoiler. */
+  /** Late-80s German-style sport sedan: two-door three-box, box flares, quad round lamps, boot wing. */
   hatch: {
     name: 'hatch',
-    rim: 'dish',
-    length: 3.75,
-    width: 1.82,
-    body: [[0.0, 0.58, 0.28, 0.88], [0.04, 0.74, 0.24, 0.98], [0.25, 0.82, 0.22, 1.0], [0.92, 0.88, 0.22, 1.0], [1.0, 0.88, 0.28, 0.99]],
+    rim: 'mesh',
+    length: 4.35,
+    width: 1.84,
+    body: [[0.0, 0.6, 0.26, 0.9], [0.03, 0.74, 0.23, 0.97], [0.25, 0.8, 0.22, 1.0], [0.8, 0.84, 0.22, 1.0], [1.0, 0.82, 0.28, 0.98]],
     bodyExp: 12,
     bodyTumble: 0.04,
-    cabin: [[0.3, 0.86, 0.82, 0.88], [0.4, 1.38, 0.84, 0.86], [0.94, 1.42, 0.86, 0.86], [1.0, 1.4, 0.86, 0.86]],
-    cabinExp: 12,
-    cabinTumble: 0.08,
+    cabin: [[0.3, 0.82, 0.8, 0.86], [0.42, 1.24, 0.82, 0.8], [0.66, 1.26, 0.84, 0.8], [0.76, 0.98, 0.84, 0.78], [0.78, 0.86, 0.84, 0.76]],
+    cabinExp: 10,
+    cabinTumble: 0.1,
     wheelRadius: 0.32,
-    wheelT: [0.17, 0.83],
+    wheelT: [0.18, 0.8],
     strakes: false,
-    spoiler: 'none',
+    spoiler: 'wing',
     archSquare: 4,
-    features: ['flares', 'roofSpoiler'],
+    features: ['flares'],
   },
   /** 80s personal-luxury coupé: very long and square, formal upright roof, vinyl top, chrome everywhere. */
   gt: {
@@ -344,7 +344,7 @@ const sidewallMat = () => (sidewall ??= new THREE.MeshStandardMaterial({ color: 
 let disc: THREE.MeshStandardMaterial | null = null;
 const discMat = () => (disc ??= new THREE.MeshStandardMaterial({ color: '#5a5c64', metalness: 0.9, roughness: 0.35 }));
 
-export type RimStyle = 'turbofan' | 'mesh' | 'star5' | 'spokes' | 'dish';
+export type RimStyle = 'turbofan' | 'mesh' | 'star5' | 'spokes' | 'dish' | 'wire';
 
 let barrel: THREE.MeshStandardMaterial | null = null;
 const barrelMat = () => (barrel ??= new THREE.MeshStandardMaterial({ color: '#202228', metalness: 0.8, roughness: 0.4, side: THREE.DoubleSide }));
@@ -478,7 +478,7 @@ function buildWheel(radius: number, accent: THREE.Color, tireMat: THREE.Material
     face.push(new THREE.CylinderGeometry(rr * 0.92, rr * 0.92, 0.018, 40).rotateZ(Math.PI / 2).translate(x - 0.012, 0, 0));
     const blade = new THREE.BoxGeometry(0.028, rr * 0.46, rr * 0.13).rotateY(0.55).translate(0, rr * 0.6, 0);
     for (let i = 0; i < 14; i++) face.push(radial(blade, (i / 14) * Math.PI * 2, x));
-  } else if (style === 'mesh') {
+  } else if (style === 'mesh' || style === 'wire') {
     face.push(new THREE.TorusGeometry(rr * 0.9, 0.018, 10, 64).rotateY(Math.PI / 2).translate(x, 0, 0));
     const bar = new THREE.BoxGeometry(0.016, rr * 1.8, 0.018);
     for (let i = 0; i < 8; i++) {

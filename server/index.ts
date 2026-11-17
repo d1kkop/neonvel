@@ -15,6 +15,7 @@ import { rateRace, START_RATING } from '../src/net/elo.ts';
 import { CARS, specFor, classOf } from '../src/game/car/catalog.ts';
 import { BOOST } from '../src/game/boostRules.ts';
 import { LEVEL_NAMES, LEVEL_PRICES } from '../src/game/products.ts';
+import { defaultLaps } from '../src/game/laps.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DB_PATH = process.env.DB_PATH ?? new URL('./neon.db', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
@@ -282,7 +283,7 @@ function startMatch(group: Client[]): void {
     c.chk = { meter: 1, top, allowedV: top, lastT: 0, lastNear: 0, last: null, violation: 0, warned: false };
   }
   const players = group.map((c) => ({ id: c.player!.id, name: c.player!.name, rating: c.player!.rating, car: c.car ?? { id: 'vortex', paint: '' } }));
-  for (const c of group) send(c, { t: 'match', matchId: m.id, levelId: m.level, weather, laps: 3, players, you: c.player!.id });
+  for (const c of group) send(c, { t: 'match', matchId: m.id, levelId: m.level, weather, laps: defaultLaps(m.level), players, you: c.player!.id });
   console.log(`match ${m.id.slice(0, 8)} ${m.level}: ${players.map((p) => `${p.name}(${p.rating})`).join(' vs ')}`);
 }
 

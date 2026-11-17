@@ -26,12 +26,12 @@ export interface CarModel {
 export const CARS: CarModel[] = [
   // Ordered from the slowest to the best: every step down the list is a better car.
   // Free starters.
-  { id: 'velvet', name: 'Velvet Coupé', style: 'coupe', paint: '#ff2bd6', accent: '#ffb000', stats: { speed: 4, accel: 5, grip: 6 }, engine: 'inline6', price: 0, tier: 'free', blurb: 'Soft 70s Italian GT. Gentle, forgiving, sticks to the line — a calm place to start.' },
-  { id: 'pocket', name: 'Pocket Rocket', style: 'hatch', paint: '#ffb000', accent: '#3dff9e', stats: { speed: 5, accel: 6, grip: 6 }, engine: 'turbo4', price: 0, tier: 'free', blurb: 'Turbo hot hatch. Small, light and eager out of every corner.' },
+  { id: 'velvet', name: 'Nocturne', style: 'coupe', paint: '#0c0c10', accent: '#ff2bd6', stats: { speed: 4, accel: 5, grip: 6 }, engine: 'turbo4', price: 0, tier: 'free', blurb: 'Mid-80s two-seat kammback in gloss black: wedge nose, glass hatch, chopped tail. Light, nimble and forgiving.' },
+  { id: 'pocket', name: 'Nordring 2.5', style: 'hatch', paint: '#f2f2f4', accent: '#00e5ff', stats: { speed: 5, accel: 6, grip: 6 }, engine: 'i4sport', price: 0, tier: 'free', blurb: 'Late-80s touring-car sedan: box flares, quad lamps, boot wing and a screaming four. Small, light, eager.' },
   { id: 'vortex', name: 'Vortex GT-R', style: 'wedge', paint: '#c8ff00', accent: '#00e5ff', stats: { speed: 6, accel: 6, grip: 6 }, engine: 'flat12', price: 0, tier: 'free', blurb: 'Pop-up wedge. Honest and balanced, with a real top end.' },
   // Locked ($0.50).
   { id: 'thunder', name: 'Thunder 454', style: 'muscle', paint: '#1a6bff', accent: '#ff2bd6', stats: { speed: 7, accel: 7, grip: 6 }, engine: 'v8muscle', price: 50, tier: 'pro', blurb: 'Big-block muscle. Brutal off the line, loud everywhere, a handful in the bends.' },
-  { id: 'cruiser', name: 'Midnight Cruiser', style: 'gt', paint: '#0c0c10', accent: '#a64dff', stats: { speed: 8, accel: 7, grip: 7 }, engine: 'v12', price: 0, tier: 'pro', blurb: 'All-black 80s turbo coupe: square, chrome waterfall grille, huge top speed.' },
+  { id: 'cruiser', name: 'Midnight Cruiser', style: 'gt', paint: '#0c0c10', accent: '#a64dff', stats: { speed: 8, accel: 7, grip: 7 }, engine: 'v12', price: 50, tier: 'pro', blurb: 'All-black 80s turbo coupe: square, chrome waterfall grille, huge top speed.' },
   { id: 'razor', name: 'Razor X', style: 'razor', paint: '#f5f5f5', accent: '#ff3b5c', stats: { speed: 8, accel: 8, grip: 8 }, engine: 'v10', price: 100, tier: 'pro', blurb: 'Knife-edge V10 supercar wedge. Fast everywhere.' },
   // ELITE ($1.50): the best.
   { id: 'phantom', name: 'Phantom LM', style: 'proto', paint: '#0b0b12', accent: '#00e5ff', stats: { speed: 9, accel: 9, grip: 9 }, engine: 'racev8', price: 150, tier: 'elite', blurb: 'Le Mans prototype. Iridescent stealth paint, screaming race V8, near-perfect in every corner.' },

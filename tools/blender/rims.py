@@ -12,7 +12,7 @@ import bpy, bmesh, math, os, sys
 from mathutils import Vector
 
 RR = 0.27
-STYLES = ['star5', 'spokes', 'turbofan', 'mesh', 'dish']
+STYLES = ['star5', 'spokes', 'turbofan', 'mesh', 'dish', 'wire']
 
 MAT_DEFS = {
     'rim': ((0.78, 0.8, 0.84), 1.0, 0.18), 'lip': ((0.95, 0.95, 0.97), 1.0, 0.05), 'barrel': ((0.08, 0.08, 0.09), 0.8, 0.45),
@@ -152,6 +152,38 @@ def disc_face(name, r0, r1, x0, x1, holes=0, hole_r=0.0, hole_at=0.0, steps=64):
     return o
 
 
+
+def wire_hub(name, xh):
+    """Wire-wheel centre: spoke flange, polished dome and a two-eared knock-off spinner."""
+    prof = [(0.0, xh + 0.105), (RR * 0.06, xh + 0.103), (RR * 0.12, xh + 0.095), (RR * 0.16, xh + 0.08), (RR * 0.17, xh + 0.06),
+            (RR * 0.2, xh + 0.05), (RR * 0.235, xh + 0.04), (RR * 0.235, xh + 0.025), (RR * 0.2, xh + 0.02), (RR * 0.2, xh - 0.03),
+            (RR * 0.24, xh - 0.035), (RR * 0.24, xh - 0.06), (0.0, xh - 0.06)]
+    o = lathe(name, prof, ['lip', 'rim'], lambda x, r: 0 if x > xh + 0.045 else 1, steps=48, smooth_angle=35)
+    bm = bmesh.new()
+    # Spinner: an octagonal nut with two tapered ears.
+    zc = xh + 0.085
+    for k in (0, 1):
+        a = k * math.pi
+        rings = []
+        for u, w, t in ((0.0, 0.024, 0.02), (0.6, 0.018, 0.016), (1.0, 0.012, 0.012)):
+            r = RR * (0.05 + 0.19 * u)
+            c = Vector((zc - 0.006 * u, math.cos(a) * r, math.sin(a) * r))
+            et = Vector((0, -math.sin(a), math.cos(a)))
+            rings.append([bm.verts.new(c + et * (sx * w / 2) + Vector((sz * t / 2, 0, 0))) for sx, sz in ((-1, -1), (1, -1), (1, 1), (-1, 1))])
+        for ra, rb in zip(rings, rings[1:]):
+            for j in range(4):
+                bm.faces.new((ra[j], ra[(j + 1) % 4], rb[(j + 1) % 4], rb[j]))
+        bm.faces.new(rings[-1])
+    rings = []
+    for x, k in ((zc - 0.015, 1.0), (zc + 0.012, 1.0), (zc + 0.02, 0.75)):
+        rings.append([bm.verts.new((x, math.cos(i * math.tau / 8 + math.pi / 8) * RR * 0.075 * k, math.sin(i * math.tau / 8 + math.pi / 8) * RR * 0.075 * k)) for i in range(8)])
+    for ra, rb in zip(rings, rings[1:]):
+        for j in range(8):
+            bm.faces.new((ra[j], ra[(j + 1) % 8], rb[(j + 1) % 8], rb[j]))
+    bm.faces.new(rings[-1])
+    spin = to_obj(name + '_spinner', bm, ['nut'], 30)
+    return [o, spin]
+
 def build_rim(style):
     parts = [barrel(f'rim_{style}')]
     bm = bmesh.new()
@@ -184,6 +216,16 @@ def build_rim(style):
         ring = bpy.context.object
         ring.data.materials.append(mat('rim'))
         parts.append(ring)
+    elif style == 'wire':
+        # Laced wire wheel: 3 x 24 thin spokes from a small hub flange to the rim, tangential, crossing in three
+        # planes (outer pair crosses, inner set laced the other way), chrome dome with a two-eared spinner.
+        xh = 0.035
+        for k in range(24):
+            A = k * math.tau / 24
+            for s, x0, x1, ph in ((1, xh + 0.035, 0.1, 0.0), (-1, xh + 0.03, 0.094, 0.5), (1, xh - 0.02, 0.06, 0.25)):
+                spoke(bm, A + ph * math.tau / 24, RR * 0.2, RR * 0.95, x0, x1, 0.0062, 0.0052, 0.0058,
+                      twist=lambda u, s=s: s * 0.36 * u, segs=4, curve=1.0, chamfer=0.5)
+        parts += wire_hub(f'rim_{style}_hub', xh)
     elif style == 'dish':
         xh = 0.09
         parts.append(disc_face(f'rim_{style}_disc', 0.3, 0.97, xh - 0.002, 0.104, holes=8, hole_r=0.12, hole_at=0.6))
@@ -191,7 +233,8 @@ def build_rim(style):
         parts.append(to_obj(f'rim_{style}_spokes', bm, ['rim'], 32))
     else:
         bm.free()
-    parts += hub(f'rim_{style}_hub', xh, r_hub=0.36 if style != 'mesh' else 0.33)
+    if style != 'wire':
+        parts += hub(f'rim_{style}_hub', xh, r_hub=0.36 if style != 'mesh' else 0.33)
     for x in bpy.context.selected_objects:
         x.select_set(False)
     for p in parts:
@@ -254,7 +297,7 @@ if __name__ == '__main__':
     objs = []
     for i, st in enumerate(STYLES):
         o = build_rim(st)
-        o.location = (0, (i - 2) * 0.7, 0) if preview else (0, 0, 0)
+        o.location = (0, (i - 2.5) * 0.7, 0) if preview else (0, 0, 0)
         objs.append(o)
     tris = sum(len(p.vertices) - 2 for o in objs for p in o.data.polygons)
     print('TRIANGLES (all rims)', tris, 'avg', tris // len(objs))
@@ -270,13 +313,13 @@ if __name__ == '__main__':
         bpy.ops.object.light_add(type='AREA', location=(3, 1, 2)); bpy.context.object.data.energy = 300; bpy.context.object.data.size = 3
         bpy.context.object.rotation_euler = (0, math.radians(60), math.radians(20))
         bpy.ops.object.light_add(type='SUN', location=(2, -2, 3)); bpy.context.object.data.energy = 2
-        bpy.ops.object.camera_add(location=(4.4, -0.7, 0.5))
+        bpy.ops.object.camera_add(location=(5.4, -0.9, 0.5))
         cam = bpy.context.object
         sc.camera = cam
         cam.data.lens = 50
         cam.rotation_euler = (Vector((0, 0, 0)) - cam.location).to_track_quat('-Z', 'Y').to_euler()
         sc.render.engine = 'BLENDER_EEVEE'
-        sc.render.resolution_x, sc.render.resolution_y = 1400, 420
+        sc.render.resolution_x, sc.render.resolution_y = 1600, 420
         sc.render.filepath = preview
         bpy.ops.render.render(write_still=True)
         print('PREVIEW', preview)
