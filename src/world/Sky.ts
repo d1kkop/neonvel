@@ -12,7 +12,9 @@ export class Sky {
     uSunColorB: { value: new THREE.Color('#ff2a9a') },
     uSunSize: { value: 0.16 },
     uSunIntensity: { value: 2.2 },
-    uSunGlow: { value: 1 },
+    uSunMask: { value: 0 },
+    uSunCore: { value: 0 },
+    uSunHot: { value: new THREE.Vector3(1.3, 0.28, 0.03) },
     uClouds: { value: 0 },
     uFlash: { value: 0 },
     uStars: { value: 1 },
@@ -41,8 +43,8 @@ export class Sky {
       fragmentShader: /* glsl */ `
         uniform vec3 uMistColor;
         uniform float uMist;
-        uniform vec3 uTop, uMid, uHorizon, uFogColor, uHazeColor, uSunColorA, uSunColorB, uMoonDir;
-        uniform float uSunSize, uSunIntensity, uSunGlow, uTime, uClouds, uFlash, uStars, uSunStripes, uDayClouds, uAurora, uNebula, uGridHorizon, uCloudTint;
+        uniform vec3 uTop, uMid, uHorizon, uFogColor, uHazeColor, uSunColorA, uSunColorB, uMoonDir, uSunHot;
+        uniform float uSunSize, uSunIntensity, uSunMask, uSunCore, uTime, uClouds, uFlash, uStars, uSunStripes, uDayClouds, uAurora, uNebula, uGridHorizon, uCloudTint;
         varying vec3 vWorld;
         ${NOISE_GLSL}
         void main() {
@@ -72,13 +74,15 @@ export class Sky {
           vec3 sx = normalize(cross(vec3(0.0, 1.0, 0.0), sd));
           vec3 sy = cross(sd, sx);
           float facing = dot(dir, sd);
-          float sunMask = 0.0; // the disc shows through the horizon haze below (a setting sun stays its own colour)
+          float sunMask = 0.0; // how much of this pixel is the sun's disc (for the horizon haze and the bloom mark)
           if (facing > 0.0) {
             vec2 p = vec2(dot(dir, sx), dot(dir, sy)) / uSunSize;
             float r = length(p);
             float disc = smoothstep(1.0, 0.985, r);
             float t = clamp(p.y * 0.5 + 0.5, 0.0, 1.0);
             vec3 sunCol = mix(uSunColorB, uSunColorA, t);
+            // Hot core (glowing suns): the middle of the disc burns toward yellow-white, the limb keeps the sun's colour.
+            sunCol = mix(sunCol, sunCol * 0.6 + uSunHot, uSunCore * pow(max(1.0 - r * r, 0.0), 0.75));
             // Stripes: get thicker towards the bottom.
             float band = fract(p.y * 7.0 + uTime * 0.05);
             float thick = clamp(-p.y * 0.55 + 0.05, 0.0, 0.7);
@@ -87,11 +91,7 @@ export class Sky {
             col = mix(col, sunCol * uSunIntensity, disc * cut * sunVis);
             sunMask = disc * cut * sunVis;
             // Glow halo.
-            // Glow halo; sunGlow > 1 adds a wide corona plus a tight bright rim (a glowing sun without pushing the disc
-            // so bright that the filmic tone mapping bleaches it to orange).
-            float rr = max(r - 1.0, 0.0);
-            float halo = 0.35 * uSunGlow * exp(-rr * (2.2 / max(uSunGlow, 1.0))) + 0.55 * max(uSunGlow - 1.0, 0.0) * exp(-rr * 7.0);
-            col += mix(uSunColorB, uSunColorA, 0.5) * halo * sunVis * (1.0 - disc * cut);
+            col += uSunColorB * 0.35 * sunVis * exp(-max(r - 1.0, 0.0) * 2.2) * (1.0 - disc * cut);
           }
 
           // Space nebula: coloured fbm clouds all around (space continues below the horizon).
@@ -137,6 +137,7 @@ export class Sky {
               dcol = mix(dcol, sc, uCloudTint);
             }
             col = mix(col, dcol, dc);
+            sunMask *= 1.0 - dc;
           }
 
           // Storm clouds: dark, lit from below by the city haze; lightning lights them up.
@@ -148,21 +149,30 @@ export class Sky {
             vec3 cloudCol = mix(uFogColor * 0.9 + uHazeColor * 0.03, uFogColor * 0.35, smoothstep(0.0, 0.45, y));
             cloudCol += vec3(0.6, 0.65, 0.9) * uFlash * (0.3 + 0.7 * n2);
             col = mix(col, cloudCol, cov * uClouds);
+            sunMask *= 1.0 - cov * uClouds;
           }
           col += vec3(0.5, 0.55, 0.8) * uFlash * 0.12;
 
           // Blend toward fog colour near/below horizon so distant city melts into sky.
           col = mix(col, uFogColor, smoothstep(0.12, 0.0, abs(y)) * 0.35 * (1.0 - sunMask * 0.9));
-          gl_FragColor = vec4(col, 1.0);
+          gl_FragColor = vec4(col, 1.0 - sunMask * uSunMask);
         }`,
     });
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -1000;
+    // The sun mark is written for the main view only (per pass: the reflection and the mirror must not carry it).
+    this.mesh.onBeforeRender = (_r, _s, camera) => {
+      const on = this.markSun && camera === this.mainCamera ? 1 : 0;
+      if (mat.uniforms.uSunMask.value !== on) {
+        mat.uniforms.uSunMask.value = on;
+        mat.uniformsNeedUpdate = true;
+      }
+    };
   }
 
   /** Apply a level's sky parameters. */
-  configure(p: { top: string; mid: string; horizon: string; sunA: string; sunB: string; sunSize: number; sunIntensity: number; sunStripes: number; stars: number; dayClouds: number; aurora?: number; nebula?: number; gridHorizon?: number; cloudTint?: number; sunGlow?: number }): void {
+  configure(p: { top: string; mid: string; horizon: string; sunA: string; sunB: string; sunSize: number; sunIntensity: number; sunStripes: number; stars: number; dayClouds: number; aurora?: number; nebula?: number; gridHorizon?: number; cloudTint?: number; sunGlow?: number; sunCore?: number }): void {
     const u = this.uniforms;
     u.uTop.value.set(p.top);
     u.uMid.value.set(p.mid);
@@ -171,8 +181,8 @@ export class Sky {
     u.uSunColorB.value.set(p.sunB);
     u.uSunSize.value = p.sunSize;
     u.uSunIntensity.value = p.sunIntensity;
-    u.uSunGlow.value = p.sunGlow ?? 1;
-    this.setGlow(p.sunGlow ?? 1, p.sunSize, p.sunA, p.sunB);
+    this.markSun = (p.sunGlow ?? 0) > 0;
+    u.uSunCore.value = p.sunCore ?? 0;
     u.uSunStripes.value = p.sunStripes;
     u.uStars.value = p.stars;
     u.uCloudTint.value = p.cloudTint ?? 0;
@@ -183,44 +193,16 @@ export class Sky {
   }
 
   /**
-   * Bloom-style sun glow (sunGlow > 1): a soft additive halo drawn over the scene at the sun, so the light bleeds
-   * over the palms / cars in front of it like the bloom around a street lamp. Real bloom needs a disc so bright that
-   * the filmic tone mapping bleaches a red sun to yellow; this keeps it red.
+   * Sun glow (a level's `sunGlow`): the sun's disc is marked in the alpha channel of the main view (alpha 0 on the
+   * disc; anything drawn in front of it writes 1 again). The bloom pass treats marked pixels as a bright source
+   * (see Renderer.setSunBoost), so the sun glows like a street lamp, over the palms in front of it, and stops glowing
+   * when a building hides it. Only the main camera writes the mark (not the road reflection or the mirror).
    */
-  private glow: THREE.Sprite | null = null;
-  private setGlow(strength: number, sunSize: number, a: string, b: string): void {
-    if (strength <= 1) { if (this.glow) this.glow.visible = false; return; }
-    if (!this.glow) {
-      const c = document.createElement('canvas');
-      c.width = c.height = 256;
-      const g = c.getContext('2d')!;
-      const img = g.createImageData(256, 256);
-      for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
-        const r = Math.hypot(x - 127.5, y - 127.5) / 128;
-        // Bright shoulder just outside the disc (r = 1/3.2), long soft tail.
-        const v = r >= 1 ? 0 : Math.min(1, Math.exp(-Math.max(r - 0.3, 0) * 7) * 0.85 + Math.exp(-r * 2.6) * 0.35) * (1 - r * r);
-        img.data.set([255, 255, 255, Math.round(v * 255)], (y * 256 + x) * 4);
-      }
-      g.putImageData(img, 0, 0);
-      const tex = new THREE.CanvasTexture(c);
-      this.glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, fog: false }));
-      this.glow.renderOrder = 900;
-      this.glow.frustumCulled = false;
-      this.mesh.add(this.glow);
-    }
-    const m = this.glow.material as THREE.SpriteMaterial;
-    m.color.set(a).lerp(new THREE.Color(b), 0.4).multiplyScalar(0.55 * strength);
-    // Sky radius 5000: put the halo at 4000 m; the disc there is 4000 * sunSize wide (radius), the halo ~3.2x that.
-    this.glow.scale.setScalar(4000 * sunSize * 2 * 3.2);
-    this.glow.visible = true;
-  }
+  private markSun = false;
+  private mainCamera: THREE.Camera | null = null;
 
   update(camera: THREE.Camera): void {
+    this.mainCamera = camera;
     this.mesh.position.copy(camera.position);
-    if (this.glow?.visible) {
-      this.glow.position.copy(atmosphere.uMoonDir.value).normalize().multiplyScalar(4000);
-      // Storm clouds hide the sun: the glow goes with it.
-      (this.glow.material as THREE.SpriteMaterial).opacity = 1 - (this.uniforms.uClouds.value as number) * 0.85;
-    }
   }
 }

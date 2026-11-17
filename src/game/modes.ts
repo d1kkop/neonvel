@@ -7,6 +7,7 @@ import { haloTexture } from './car/CarBuilder';
  * Extra game modes on top of the race tracks:
  *  - Highway Rush: open road with civilian traffic, near-miss style points, checkpoints that add time.
  *  - Heat: a police chase — the heat rises, more patrol cars join, roadblocks appear; don't get boxed in.
+ *    Shake the patrol cars off (out of their range for a few seconds) and the heat cools, star by star.
  */
 export type ModeId = 'race' | 'highway' | 'heat';
 
@@ -170,15 +171,33 @@ interface Cop {
   bar: { red: THREE.MeshBasicMaterial; blue: THREE.MeshBasicMaterial; redHalo: THREE.SpriteMaterial; blueHalo: THREE.SpriteMaterial };
   ai: AiDriver;
   block?: boolean;
+  /** Has reached the player at least once (until then it races to the scene). */
+  engaged?: boolean;
 }
 
-/** Heat: survive the police chase. Busted when boxed in (slow, with a patrol car right on you). */
+/** A patrol car further away than this (metres along the road) has lost you. */
+const LOST_RANGE = 100;
+/** Seconds out of every patrol car's range that cool the heat by one star. */
+const COOL_TIME = 5;
+/** Patrol-car top speed as a fraction of the player's car, per heat star (1..5): they match you, then outpace you. */
+const COP_PACE = [0.98, 1.0, 1.02, 1.04, 1.06];
+
+/**
+ * Heat: a police chase. Busted when boxed in (slow, with a patrol car right on you). You win by outlasting the
+ * clock — or by shaking the patrol cars off: every COOL_TIME seconds spent out of their range cools one star and
+ * makes one of them give up; with no stars left you have escaped.
+ */
 export class HeatMode implements GameMode {
   readonly id = 'heat' as const;
   private readonly traffic = new Traffic(14);
   private readonly cops: Cop[] = [];
   private time = 0;
   private heat = 1;
+  /** Seconds spent out of range (0..COOL_TIME). */
+  private cool = 0;
+  /** Time of the last heat gained from trading paint with a patrol car (rate limit). */
+  private lastRam = -9;
+  private shaken = false;
   private busted = 0;
   private nears = 0;
   private score = 0;
@@ -192,7 +211,10 @@ export class HeatMode implements GameMode {
 
   start(w: World): void {
     this.traffic.start(w);
-    this.spawnCop(w, -140);
+    this.spawnCop(w, -25);
+    // The boost bar starts low: a breakaway takes a full bar, and that has to be earned first
+    // (drifts, near misses, trading paint).
+    w.player.phys.boost = 0.3;
   }
 
   /**
@@ -227,32 +249,47 @@ export class HeatMode implements GameMode {
 
   private spawnCop(w: World, ds: number, block?: { x: number }): void {
     const P = w.player.phys;
-    const ai: AiDriver = { skill: 1.06, lane: P.x, laneTimer: 1e9, useBoost: !block };
+    const ai: AiDriver = { skill: 1.06, lane: P.x, laneTimer: 1e9, useBoost: false };
+    const ps = w.player.spec;
     const car = w.addNpc({
-      setup: { style: 'gt', paint: '#0e0e14', accent: '#2a6bff', tier: 'pro', spec: { topSpeed: 92, accel: 17, grip: 27 } },
+      setup: { style: 'gt', paint: '#0e0e14', accent: '#2a6bff', tier: 'pro', spec: { topSpeed: ps.topSpeed, accel: ps.accel * 1.05, grip: ps.grip * 1.03 } },
       s: P.s + ds,
       x: block ? block.x : P.x,
       kind: 'police',
       cruise: block ? 0 : Math.max(20, P.v),
-      brain: block ? undefined : (c, dt) => this.copBrain(c, ai, w, dt),
+      brain: block ? undefined : (_c, dt) => this.copBrain(cop, w, dt),
     });
     if (block) { car.lane = block.x; car.cruise = 0; }
-    this.cops.push({ car, bar: this.makeLightBar(car), ai, block: !!block });
+    const cop: Cop = { car, bar: this.makeLightBar(car), ai, block: !!block };
+    this.cops.push(cop);
   }
 
-  /** Race line + speed from the racing AI, but the steering homes in on the player when close. */
-  private copBrain(c: CarEntry, ai: AiDriver, w: World, dt: number) {
+  /**
+   * Race line + speed from the racing AI, but the steering homes in on the player when close.
+   * Pace: a fraction of the player's top speed that grows with the heat (COP_PACE). In sight but dropped
+   * (60 m .. LOST_RANGE behind) they sprint to catch up; out of range they have lost you and only search on,
+   * slower — so a gap you open with your boost can be turned into an escape. A car that has just been called in
+   * races to the scene until it first reaches you.
+   */
+  private copBrain(cop: Cop, w: World, dt: number) {
+    const c = cop.car, ai = cop.ai;
     const P = w.player.phys;
     ai.lane = P.x;
-    const inp = aiInput(c.phys, ai, c.spec, w.track, [c.phys], dt);
     const ds = P.s - c.phys.s;
+    const stars = Math.max(1, Math.min(5, Math.floor(this.heat)));
+    const inRange = Math.abs(ds) < LOST_RANGE;
+    if (Math.abs(ds) < 60) cop.engaged = true;
+    const sprint = ds > 60 && (inRange || !cop.engaged);
+    c.spec.topSpeed = w.player.spec.topSpeed * COP_PACE[stars - 1] * (!cop.engaged ? 1.15 : sprint ? 1.08 : inRange ? 1 : 0.85);
+    const inp = aiInput(c.phys, ai, c.spec, w.track, [c.phys], dt);
     if (ds > -4 && ds < 30) {
       const dx = P.x - c.phys.x;
       inp.steer = Math.max(-1, Math.min(1, inp.steer + dx * 0.12));
       if (ds < 12) inp.throttle = 1;
     }
-    // Rubber band: patrol cars never fall hopelessly behind (hotter = faster).
-    if (ds > 60) { inp.throttle = 1; inp.brake = 0; if (c.phys.boost < 0.5) c.phys.boost += dt * 0.05 * this.heat; }
+    if (sprint) inp.throttle = 1;
+    // Racing to the scene: boost all the way (so it also makes up ground out of the corners).
+    if (!cop.engaged) { c.phys.boost = 1; inp.boost = 1; }
     return inp;
   }
 
@@ -263,16 +300,49 @@ export class HeatMode implements GameMode {
     const near = this.traffic.update(w, ev, this.time);
     if (near) {
       this.nears += near;
-      this.heat = Math.min(5, this.heat + 0.12 * near);
+      this.heat = Math.min(5, this.heat + 0.1 * near);
       this.score += 150 * near;
       P.boost = Math.min(1, P.boost + 0.05 * near);
       this.pops.push({ text: 'NEAR MISS', good: true });
     }
-    for (const h of ev.npcHits) if (h.car.isPlayer && h.npc.kind === 'police' && h.strength > 0.2) this.heat = Math.min(5, this.heat + 0.05);
-    this.heat = Math.min(5, this.heat + dt * (P.boosting ? 0.03 : 0.012));
+    // Trading paint with a patrol car heats things up (at most once every 1.5 s: a car leaning on you is one event).
+    if (this.time - this.lastRam > 1.5 && ev.npcHits.some((h) => h.car.isPlayer && h.npc.kind === 'police' && h.strength > 0.2)) {
+      this.lastRam = this.time;
+      this.heat = Math.min(5, this.heat + 0.04);
+    }
+    // In range of a patrol car the heat creeps up; out of every car's range it cools (one star per COOL_TIME).
+    const pursuers = this.cops.filter((c) => !c.block);
+    const gap = (c: Cop) => Math.abs(c.car.phys.s - P.s);
+    const pursued = pursuers.some((c) => gap(c) < LOST_RANGE && (c.engaged || gap(c) < 60));
+    if (pursued) {
+      this.cool = Math.max(0, this.cool - dt * 2);
+      this.heat = Math.min(5, this.heat + dt * 0.012);
+    } else {
+      this.cool += dt;
+      if (this.cool >= COOL_TIME) {
+        this.cool = 0;
+        this.heat = Math.max(0, Math.floor(this.heat) - 1) + 0.5; // down one star
+        this.score += 600;
+        const stars = Math.floor(this.heat);
+        // The patrol car furthest away gives up.
+        const far = pursuers.sort((a, b) => gap(b) - gap(a))[0];
+        if (far && pursuers.length > Math.min(4, stars)) {
+          w.removeNpc(far.car);
+          this.cops.splice(this.cops.indexOf(far), 1);
+        }
+        if (stars < 1) {
+          this.shaken = true;
+          this.escaped = true;
+          this.done = true;
+          this.score += 2000;
+          return;
+        }
+        this.pops.push({ text: `HEAT DOWN ${'★'.repeat(stars)}`, good: true });
+      }
+    }
     // More patrol cars as the heat rises.
     const chasers = this.cops.filter((c) => !c.block).length;
-    if (chasers < Math.min(4, Math.floor(this.heat))) {
+    if (pursued && chasers < Math.min(4, Math.floor(this.heat))) {
       this.spawnCop(w, -170 - Math.random() * 60);
       this.pops.push({ text: `HEAT ${Math.floor(this.heat)}`, good: false });
     }
@@ -329,9 +399,14 @@ export class HeatMode implements GameMode {
   }
 
   hud(): string[] {
-    const stars = '★'.repeat(Math.floor(this.heat)) + '☆'.repeat(5 - Math.floor(this.heat));
+    const n = Math.max(0, Math.min(5, Math.floor(this.heat)));
+    const stars = '★'.repeat(n) + '☆'.repeat(5 - n);
     const left = Math.max(0, this.goal - this.time);
-    return [`HEAT ${stars}`, this.busted > 0.3 ? `BUSTED ${'▮'.repeat(Math.ceil((this.busted / 2.6) * 5))}${'▯'.repeat(5 - Math.ceil((this.busted / 2.6) * 5))}` : `ESCAPE IN ${left.toFixed(0)}s`];
+    const bar = (k: number) => '▮'.repeat(Math.ceil(k * 5)) + '▯'.repeat(5 - Math.ceil(k * 5));
+    const line = this.busted > 0.3 ? `BUSTED ${bar(Math.min(1, this.busted / 2.6))}`
+      : this.cool > 0.4 ? `LOSING THEM ${bar(Math.min(1, this.cool / COOL_TIME))}`
+      : `ESCAPE IN ${left.toFixed(0)}s`;
+    return [`HEAT ${stars}`, line];
   }
 
   takePops(): { text: string; good: boolean }[] {
@@ -341,8 +416,10 @@ export class HeatMode implements GameMode {
   }
 
   result(): ModeResult {
+    const pts = `${Math.round(this.score).toLocaleString('en-US')} points`;
+    if (this.shaken) return { title: 'ESCAPED!', detail: `Shook off the police in ${this.time.toFixed(0)} s · ${pts} · ${this.nears} near misses`, score: Math.round(this.score), won: true };
     return this.escaped
-      ? { title: 'ESCAPED!', detail: `${Math.round(this.score).toLocaleString('en-US')} points · heat ${Math.floor(this.heat)} · ${this.nears} near misses`, score: Math.round(this.score), won: true }
+      ? { title: 'ESCAPED!', detail: `${pts} · heat ${Math.floor(this.heat)} · ${this.nears} near misses`, score: Math.round(this.score), won: true }
       : { title: 'BUSTED', detail: `${this.time.toFixed(0)} s on the run · ${Math.round(this.score).toLocaleString('en-US')} points`, score: Math.round(this.score), won: false };
   }
 }

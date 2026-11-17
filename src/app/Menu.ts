@@ -590,9 +590,9 @@ export class Menu {
     this.show('results', false);
   }
 
-  showLoading(text: string): void {
+  showLoading(): void {
     const el = this.screens.get('loading')!;
-    el.innerHTML = `<div class="title" style="margin-top:40vh">LOADING</div><div class="status">${esc(text)}</div>`;
+    el.innerHTML = '<div class="title" style="margin-top:40vh">LOADING</div>';
     this.show('loading', false);
   }
 

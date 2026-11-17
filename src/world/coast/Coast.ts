@@ -327,6 +327,8 @@ export function createOcean(opts: { deep: string; shallow: string; skyHorizon: s
       uShallow: { value: new THREE.Color(opts.shallow) },
       uSky: { value: new THREE.Color(opts.skyHorizon) },
       uNight: { value: opts.night ? 1 : 0 },
+      /** How much the wave shading is calmed in the far distance (0 = not at all, 1 = flat). */
+      uFarCalm: { value: 0.75 },
     },
     vertexShader: /* glsl */ `
       varying vec3 vWorld;
@@ -337,32 +339,33 @@ export function createOcean(opts: { deep: string; shallow: string; skyHorizon: s
       }`,
     fragmentShader: /* glsl */ `
       uniform vec3 uDeep, uShallow, uSky;
-      uniform float uNight;
+      uniform float uNight, uFarCalm;
       varying vec3 vWorld;
       ${ATMOS_PARS}
       ${NOISE_GLSL}
-      // Wave slope; ws = weight of the small chop (faded out where a pixel covers several metres: no aliasing).
-      vec2 waveGrad(vec2 p, float t, float ws) {
+      vec2 waveGrad(vec2 p, float t) {
         float e = 0.6;
-        float h0 = fbm(p * 0.08 + vec2(t * 0.05, t * 0.03)) + 0.5 * ws * vnoise(p * 0.35 - vec2(t * 0.2, 0.0));
-        float hx = fbm((p + vec2(e, 0.0)) * 0.08 + vec2(t * 0.05, t * 0.03)) + 0.5 * ws * vnoise((p + vec2(e, 0.0)) * 0.35 - vec2(t * 0.2, 0.0));
-        float hz = fbm((p + vec2(0.0, e)) * 0.08 + vec2(t * 0.05, t * 0.03)) + 0.5 * ws * vnoise((p + vec2(0.0, e)) * 0.35 - vec2(t * 0.2, 0.0));
+        float h0 = fbm(p * 0.08 + vec2(t * 0.05, t * 0.03)) + 0.5 * vnoise(p * 0.35 - vec2(t * 0.2, 0.0));
+        float hx = fbm((p + vec2(e, 0.0)) * 0.08 + vec2(t * 0.05, t * 0.03)) + 0.5 * vnoise((p + vec2(e, 0.0)) * 0.35 - vec2(t * 0.2, 0.0));
+        float hz = fbm((p + vec2(0.0, e)) * 0.08 + vec2(t * 0.05, t * 0.03)) + 0.5 * vnoise((p + vec2(0.0, e)) * 0.35 - vec2(t * 0.2, 0.0));
         return vec2(hx - h0, hz - h0) / e;
       }
       void main() {
         float dist = length(cameraPosition - vWorld);
-        // Pixel footprint in metres (area mean, so grazing angles don't over-blur).
+        vec2 g = waveGrad(vWorld.xz, uTime) * (1.0 / (1.0 + dist / 300.0));
+        // Far away one pixel covers many metres of water, and the wave shading there turns into crawling grain:
+        // calm the shading with the pixel footprint. The sun glitter below keeps the full slope (its sparkle path
+        // is the look of this sea; a filtered slope turns it into one flat white blob).
         float fa = length(dFdx(vWorld.xz)), fb = length(dFdy(vWorld.xz));
-        float foot = max(mix(sqrt(fa * fb) * 1.3, max(fa, fb), smoothstep(15.0, 60.0, dist)), 1e-3);
-        float ws = 1.0 - smoothstep(0.4, 1.4, foot * 0.35 * 4.0);   // small chop (0.35 c/m)
-        float wb = 1.0 - smoothstep(0.5, 1.6, foot * 0.6);          // fbm's finest octaves
-        vec2 g = waveGrad(vWorld.xz, uTime, ws) * (1.0 / (1.0 + dist / 300.0)) * mix(0.35, 1.0, wb);
-        vec3 n = normalize(vec3(-g.x * 3.0, 1.0, -g.y * 3.0));
+        float foot = mix(sqrt(fa * fb) * 1.3, max(fa, fb), smoothstep(15.0, 60.0, dist)); // area mean near, long axis far
+        float calm = 1.0 - uFarCalm * smoothstep(0.8, 2.7, foot);
+        vec3 n = normalize(vec3(-g.x * 3.0 * calm, 1.0, -g.y * 3.0 * calm));
+        vec3 nGlint = normalize(vec3(-g.x * 3.0, 1.0, -g.y * 3.0));
         vec3 v = normalize(cameraPosition - vWorld);
         float fres = pow(clamp(1.0 - dot(n, v), 0.0, 1.0), 4.0);
         vec3 water = mix(uShallow, uDeep, smoothstep(0.0, 0.6, n.y * 0.5 + fbm(vWorld.xz * 0.01) * 0.6));
         vec3 col = mix(water, uSky, clamp(fres * 1.2, 0.0, 1.0));
-        vec3 r = reflect(-v, n);
+        vec3 r = reflect(-v, nGlint);
         float sun = pow(max(dot(r, normalize(uMoonDir)), 0.0), uNight > 0.5 ? 60.0 : 300.0);
         col += vec3(1.0, 0.95, 0.8) * sun * (uNight > 0.5 ? 1.2 : 6.0);
         gl_FragColor = vec4(applyAtmos(col, vWorld), 1.0);

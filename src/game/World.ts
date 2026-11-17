@@ -162,6 +162,7 @@ export class World {
     this.scene.add(this.hemi, this.sun);
 
     this.sky.configure(L.sky);
+    this.renderer.setSunBoost(L.sky.sunGlow ?? 0);
     this.scene.add(this.sky.mesh);
 
     // --- Track & road
@@ -242,6 +243,7 @@ export class World {
       });
     });
     this.placeCars(0);
+    this.boostFx.prewarm(this.cars); // hidden flames / trails exist before the shader precompile
   }
 
   /** Direction of travel (velocity) of a car in world space — the chase camera follows this. */

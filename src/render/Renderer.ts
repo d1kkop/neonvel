@@ -47,6 +47,22 @@ export class Renderer {
         }`,
     }));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.32, 0.3, 1.15);
+    // Sun glow: the sky marks the sun's disc with alpha 0 (see Sky). Marked pixels always pass the bloom's
+    // brightness cut, scaled by uSunBoost. A deep-red sun is far too dark in luminance to bloom on its own, and
+    // simply making it brighter lets the filmic tone mapping bleach it to yellow-white.
+    const hp = this.bloom.materialHighPassFilter;
+    hp.uniforms.uSunBoost = { value: 0 };
+    const hpSrc = hp.fragmentShader;
+    hp.fragmentShader = hpSrc
+      .replace('uniform float smoothWidth;', 'uniform float smoothWidth;\nuniform float uSunBoost;')
+      .replace('float v = luminance( texel.xyz );',
+        'float sunK = uSunBoost > 0.0 ? clamp( 1.0 - texel.a, 0.0, 1.0 ) : 0.0;\n' +
+        'texel = vec4( texel.rgb * mix( 1.0, uSunBoost, sunK ), 1.0 );\n' +
+        'float v = luminance( texel.xyz );')
+      .replace('float alpha = smoothstep( luminosityThreshold, luminosityThreshold + smoothWidth, v );',
+        'float alpha = max( smoothstep( luminosityThreshold, luminosityThreshold + smoothWidth, v ), sunK );');
+    if (hp.fragmentShader === hpSrc || !hp.fragmentShader.includes('sunK );')) console.warn('Sun glow: bloom shader patch did not apply');
+    hp.needsUpdate = true;
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
     this.vhs = new ShaderPass({
@@ -95,6 +111,11 @@ export class Renderer {
     u.uRewind.value = rewind;
     u.uTime.value = time;
     this.vhs.enabled = strength > 0.001 || rewind > 0.001;
+  }
+
+  /** Sun glow strength for this level (0 = off): how bright the sun's disc counts for the bloom. */
+  setSunBoost(v: number): void {
+    this.bloom.materialHighPassFilter.uniforms.uSunBoost.value = v;
   }
 
   setScene(scene: THREE.Scene, camera: THREE.Camera): void {

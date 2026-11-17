@@ -37,7 +37,7 @@ export const palmCoast: LevelDef = {
   // long low orange light with a cool purple fill from the sky side.
   sky: {
     top: '#1c1a52', mid: '#c24e78', horizon: '#ff7a3e', sunA: '#ff1c08', sunB: '#c00410',
-    sunSize: 0.11, sunIntensity: 1.7, sunGlow: 2.4, sunStripes: 0, stars: 0.15, dayClouds: 0.6, cloudTint: 1,
+    sunSize: 0.11, sunIntensity: 1.7, sunGlow: 1.1, sunCore: 0.4, sunStripes: 0, stars: 0.15, dayClouds: 0.6, cloudTint: 1,
   },
   atmosphere: {
     fogColor: '#e0846e', fogDensity: 0.0005, hazeColor: '#ff8a5a', hazeTop: 22, hazeStrength: 0.35, overcastColor: '#6a5a6e',

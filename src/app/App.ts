@@ -306,7 +306,7 @@ export class App {
     }
     const level = levelById(this.settings.levelId);
     const weather = this.raceWeather(level);
-    this.menu.showLoading(`${level.name} · ${weather.toUpperCase()}`);
+    this.menu.showLoading();
     this.state = 'loading';
     this.paused = false;
     // Let the loading screen paint before the (synchronous) level build.
@@ -952,7 +952,7 @@ export class App {
     const level = levelById(m.levelId);
     this.online = { matchId: m.matchId, you: m.you, players: m.players, laps: m.laps, finishedSent: false };
     this.lastWasOnline = true;
-    this.menu.showLoading(`ONLINE · ${level.name} · ${m.players.map((p) => p.name).join(' vs ')}`);
+    this.menu.showLoading();
     this.state = 'loading';
     this.paused = false;
     window.setTimeout(async () => {

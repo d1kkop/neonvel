@@ -73,7 +73,7 @@ abstract class Encounter {
 
 function astronaut(): THREE.Group {
   const g = new THREE.Group();
-  const suit = std('#f2f2ee', { roughness: 0.75 });
+  const suit = std('#f2f2ee', { roughness: 0.75, emissive: '#34342f' }); // self-lit a little (no light on the visitor)
   const dark = std('#2a2a30', { roughness: 0.6 });
   const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.27, 0.42, 6, 14), suit);
   torso.position.set(0, 0.55, 0);
@@ -141,14 +141,13 @@ export class FloatingRoadster extends Encounter {
     car.group.getObjectByName('cabin')?.removeFromParent(); // convertible
     car.group.getObjectByName('shadow')?.removeFromParent(); // floating: no road under it
     car.setBrake(0);
-    // Space is dark: make the paint glow a little so the red reads.
+    // Space is dark: the paint glows a little so the red reads. No real light on the car: a light that only
+    // exists while the roadster is visible changes the scene's light count, and three.js then recompiles every
+    // lit shader on the spot (a freeze of seconds the first time it showed up).
     car.group.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshPhysicalMaterial | undefined;
-      if (m && 'emissive' in m && m.color && m.color.r > 0.5 && m.color.g < 0.2) m.emissive.set('#5a0410');
+      if (m && 'emissive' in m && m.color && m.color.r > 0.5 && m.color.g < 0.2) m.emissive.set('#8a0c1e');
     });
-    const key = new THREE.PointLight('#fff2e0', 40, 14, 1.5);
-    key.position.set(2, 4, -1);
-    car.group.add(key);
     // Low windscreen.
     const ws = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.32), std('#9ad8ff', { metalness: 0.9, roughness: 0.05, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
     ws.position.set(0, 1.0, -car.style.length * 0.12);

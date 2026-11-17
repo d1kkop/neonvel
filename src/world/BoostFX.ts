@@ -143,6 +143,14 @@ export class BoostFX {
     return s;
   }
 
+  /**
+   * Build the (hidden) flames, glow and trails for these cars now. Call before the level's shaders are compiled:
+   * otherwise the flame and trail shaders compile on the first boost of the race, which freezes the game for a moment.
+   */
+  prewarm(cars: BoostCar[]): void {
+    for (const c of cars) if (c.car.exhausts && !this.state.has(c)) this.create(c);
+  }
+
   /** `mist` 0..1: the glow behind a boosting car grows and brightens in fog / mist. */
   update(dt: number, cars: BoostCar[], mist: number): void {
     this.time += dt;
