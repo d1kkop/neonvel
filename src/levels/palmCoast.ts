@@ -12,9 +12,9 @@ const PASTELS = ['#ffb3c7', '#9fe3e0', '#ffe3a3', '#c7b3ff', '#ffc9a3', '#b3ffd1
 export const palmCoast: LevelDef = {
   id: 'palm-coast',
   name: 'Palm Coast',
-  tagline: 'Sun, surf and pastel hotels along an endless beach.',
-  cardColors: ['#22a6d8', '#ffb36b'],
-  time: 'day',
+  tagline: 'Pastel hotels and palms while a red sun sinks into the sea.',
+  cardColors: ['#ff6a3a', '#7a3aa8'],
+  time: 'dusk',
   seed: 4242,
   track: {
     points: [
@@ -32,21 +32,23 @@ export const palmCoast: LevelDef = {
       { type: 'tunnel', start: 2050, end: 2260 },
     ],
   },
+  // Sunset: a big red sun sinking into the sea at the end of the start straight, violet sky overhead,
+  // long low orange light with a cool purple fill from the sky side.
   sky: {
-    top: '#1f63d6', mid: '#5fb0ff', horizon: '#ffe0b8', sunA: '#ffffff', sunB: '#fff2c0',
-    sunSize: 0.06, sunIntensity: 6, sunStripes: 0, stars: 0, dayClouds: 0.7,
+    top: '#1c1a52', mid: '#c24e78', horizon: '#ff7a3e', sunA: '#ff3a1c', sunB: '#b00616',
+    sunSize: 0.11, sunIntensity: 1.45, sunStripes: 0, stars: 0.15, dayClouds: 0.6, cloudTint: 1,
   },
   atmosphere: {
-    fogColor: '#b8daf5', fogDensity: 0.00045, hazeColor: '#fff0d8', hazeTop: 18, hazeStrength: 0.25, overcastColor: '#8a96a8',
+    fogColor: '#e0846e', fogDensity: 0.0005, hazeColor: '#ff8a5a', hazeTop: 22, hazeStrength: 0.35, overcastColor: '#6a5a6e',
   },
   lighting: {
-    hemiSky: '#cfe6ff', hemiGround: '#e8cf9a', hemiIntensity: 1.3, sunColor: '#fff3dc', sunIntensity: 2.6,
-    sunDir: [0.45, 0.55, -0.7], exposure: 0.95, bloom: { strength: 0.12, radius: 0.3, threshold: 1.6 },
-    env: { top: '#2a6fd6', horizon: '#ffe6c8', ground: '#e0c890', panels: ['#ffffff', '#ffffff', '#fff6e0', '#bfe0ff'] },
+    hemiSky: '#7c6ac8', hemiGround: '#ff9466', hemiIntensity: 0.95, sunColor: '#ff7038', sunIntensity: 2.3,
+    sunDir: [0.93, 0.025, -0.36], exposure: 1.0, bloom: { strength: 0.28, radius: 0.35, threshold: 1.15 },
+    env: { top: '#2a2468', horizon: '#ff7a44', ground: '#6a4250', panels: ['#ff8a50', '#ffb07a', '#ff5a6a', '#b0a0ff'] },
   },
   road: {
-    lampsOn: false, leftNeon: '#00c8d8', rightNeon: '#ff5fb0', leftLamp: '#ffffff', rightLamp: '#ffffff',
-    neonIntensity: 0.45, asphalt: '#55545c', reflect: 0.22, wetness: 0.1, concrete: '#efe9df', wallStyle: 'guardrail', lampStyle: 'post', railColor: '#e8ecf2',
+    lampsOn: true, leftNeon: '#00c8d8', rightNeon: '#ff5fb0', leftLamp: '#ffd2a0', rightLamp: '#ffd2a0',
+    neonIntensity: 0.75, asphalt: '#4a4450', reflect: 0.7, wetness: 0.35, concrete: '#efe9df', wallStyle: 'guardrail', lampStyle: 'post', railColor: '#e8ecf2',
   },
   weathers: ['clear', 'rain', 'storm'],
   defaultWeather: 'clear',
@@ -61,10 +63,10 @@ export const palmCoast: LevelDef = {
     const rng = new Rng(ctx.seed);
     const shoulder = track.height - 0.4;
     const terrain = new CoastTerrain(track, {
-      shoulder, sand: '#f0dcae', wetSand: '#c2a676', grass: '#5f9f45', hills: 26, cell: ctx.quality === 'low' ? 16 : 12,
+      shoulder, sand: '#f0dcae', wetSand: '#c2a676', grass: '#5f9f45', hills: 26, cell: ctx.quality === 'low' ? 16 : 12, subdiv: ctx.quality === 'low' ? 1 : ctx.quality === 'medium' ? 2 : 3,
     });
     scene.add(terrain.mesh);
-    scene.add(createOcean({ deep: '#0a5a9a', shallow: '#33c4d4', skyHorizon: '#bfe2ff', level: 0 }));
+    scene.add(createOcean({ deep: '#1c2f6a', shallow: '#3a7aa6', skyHorizon: '#ff9a6a', level: 0 }));
 
     const hw = track.width / 2;
     const frame = makeFrame();

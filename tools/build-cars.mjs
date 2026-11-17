@@ -14,6 +14,18 @@ fs.mkdirSync(TMP, { recursive: true });
 fs.mkdirSync(OUT, { recursive: true });
 const env = { ...process.env, TEMP: TMP, TMP };
 
+// Rims (one .glb with every design): built when asked for by name ('rims') or when building everything.
+const wantedArgs = process.argv.slice(2);
+if (!wantedArgs.length || wantedArgs.includes('rims')) {
+  const raw = path.join(TMP, 'rims.raw.glb');
+  const outDir = path.join(root, 'public/models/wheels');
+  fs.mkdirSync(outDir, { recursive: true });
+  const out = path.join(outDir, 'rims.glb');
+  execFileSync(BLENDER, ['--background', '--python', path.join(root, 'tools/blender/rims.py'), '--', raw], { env, stdio: 'pipe' });
+  execFileSync(GLTFPACK, ['-i', raw, '-o', out, '-cc', '-kn', '-km'], { env, stdio: 'pipe', shell: true });
+  console.log(`rims: raw ${(fs.statSync(raw).size / 1024).toFixed(0)} KB → ${(fs.statSync(out).size / 1024).toFixed(0)} KB`);
+}
+
 const scripts = fs.readdirSync(path.join(root, 'tools/blender')).filter((f) => /^car_.*\.py$/.test(f));
 const wanted = process.argv.slice(2);
 for (const file of scripts) {

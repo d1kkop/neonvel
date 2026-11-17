@@ -1,6 +1,7 @@
 {
  "wedge": {
   "name": "wedge",
+  "rim": "turbofan",
   "length": 4.4,
   "width": 1.86,
   "body": [
@@ -77,7 +78,7 @@
   ],
   "cabinExp": 9,
   "cabinTumble": 0.2,
-  "wheelRadius": 0.35079,
+  "wheelRadius": 0.36234,
   "wheelT": [
    0.17,
    0.81
@@ -91,6 +92,7 @@
  },
  "muscle": {
   "name": "muscle",
+  "rim": "star5",
   "length": 5.2,
   "width": 2,
   "body": [
@@ -167,7 +169,7 @@
   ],
   "cabinExp": 12,
   "cabinTumble": 0.1,
-  "wheelRadius": 0.38592,
+  "wheelRadius": 0.40031999999999995,
   "wheelT": [
    0.16,
    0.8
@@ -184,6 +186,7 @@
  },
  "coupe": {
   "name": "coupe",
+  "rim": "spokes",
   "length": 4.4,
   "width": 1.86,
   "body": [
@@ -260,7 +263,7 @@
   ],
   "cabinExp": 4.5,
   "cabinTumble": 0.24,
-  "wheelRadius": 0.36448,
+  "wheelRadius": 0.37807999999999997,
   "wheelT": [
    0.19,
    0.79
@@ -275,6 +278,7 @@
  },
  "hatch": {
   "name": "hatch",
+  "rim": "dish",
   "length": 3.75,
   "width": 1.82,
   "body": [
@@ -339,7 +343,7 @@
   ],
   "cabinExp": 12,
   "cabinTumble": 0.08,
-  "wheelRadius": 0.33728,
+  "wheelRadius": 0.34688,
   "wheelT": [
    0.17,
    0.83
@@ -354,6 +358,7 @@
  },
  "gt": {
   "name": "gt",
+  "rim": "mesh",
   "length": 5.3,
   "width": 1.98,
   "body": [
@@ -430,7 +435,7 @@
   ],
   "cabinExp": 10,
   "cabinTumble": 0.12,
-  "wheelRadius": 0.37204999999999994,
+  "wheelRadius": 0.3842999999999999,
   "wheelT": [
    0.16,
    0.8
@@ -446,6 +451,7 @@
  },
  "proto": {
   "name": "proto",
+  "rim": "turbofan",
   "length": 4.8,
   "width": 2.04,
   "body": [
@@ -528,7 +534,7 @@
   ],
   "cabinExp": 5,
   "cabinTumble": 0.3,
-  "wheelRadius": 0.3681,
+  "wheelRadius": 0.37260000000000004,
   "wheelT": [
    0.17,
    0.82
@@ -543,6 +549,7 @@
  },
  "hyper": {
   "name": "hyper",
+  "rim": "star5",
   "length": 4.6,
   "width": 2.1,
   "body": [
@@ -625,7 +632,7 @@
   ],
   "cabinExp": 7,
   "cabinTumble": 0.3,
-  "wheelRadius": 0.37134,
+  "wheelRadius": 0.37764,
   "wheelT": [
    0.2,
    0.8
@@ -640,6 +647,7 @@
  },
  "bus": {
   "name": "bus",
+  "rim": "dish",
   "length": 11,
   "width": 2.5,
   "body": [
@@ -697,6 +705,7 @@
  },
  "razor": {
   "name": "razor",
+  "rim": "mesh",
   "length": 4.5,
   "width": 2.06,
   "body": [
@@ -773,7 +782,7 @@
   ],
   "cabinExp": 2,
   "cabinTumble": 0.3,
-  "wheelRadius": 0.37944,
+  "wheelRadius": 0.39024000000000003,
   "wheelT": [
    0.19,
    0.8

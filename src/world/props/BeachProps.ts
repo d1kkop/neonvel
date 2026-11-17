@@ -31,11 +31,14 @@ export function instanced(geo: THREE.BufferGeometry, mat: THREE.Material, list: 
 /** Striped beach umbrellas (stripes via vertex colours, tint via instance colour). */
 export function createUmbrellas(list: Placement[]): THREE.Group {
   const g = new THREE.Group();
-  const canopy = new THREE.ConeGeometry(1.7, 0.55, 12, 1, true).toNonIndexed();
+  const canopy = new THREE.ConeGeometry(1.7, 0.55, 48, 3, true).toNonIndexed();
   canopy.translate(0, 2.3, 0);
   const cols = new Float32Array(canopy.getAttribute('position').count * 3);
+  const cpos = canopy.getAttribute('position');
   for (let tri = 0; tri < cols.length / 9; tri++) {
-    const c = tri % 2 ? 1 : 0.35;
+    // 12 stripes by angle (independent of the segment count).
+    const cx = cpos.getX(tri * 3) + cpos.getX(tri * 3 + 1) + cpos.getX(tri * 3 + 2), cz = cpos.getZ(tri * 3) + cpos.getZ(tri * 3 + 1) + cpos.getZ(tri * 3 + 2);
+    const c = Math.floor(((Math.atan2(cz, cx) / (Math.PI * 2)) + 1) * 12) % 2 ? 1 : 0.35;
     for (let v = 0; v < 3; v++) cols.set([c, c, c], tri * 9 + v * 3);
   }
   canopy.setAttribute('color', new THREE.BufferAttribute(cols, 3));
@@ -43,7 +46,7 @@ export function createUmbrellas(list: Placement[]): THREE.Group {
   const canopyMat = applyAtmosphere(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide }));
   const palette = ['#ff2bd6', '#00c8d8', '#ffd23f', '#ff6a3c', '#ffffff'].map((c) => new THREE.Color(c));
   g.add(instanced(canopy, canopyMat, list, palette));
-  const pole = new THREE.CylinderGeometry(0.04, 0.04, 2.4, 6).translate(0, 1.2, 0);
+  const pole = new THREE.CylinderGeometry(0.04, 0.04, 2.4, 16).translate(0, 1.2, 0);
   g.add(instanced(pole, applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#f0f0f0' })), list));
   // Towels next to them.
   const towel = new THREE.BoxGeometry(0.9, 0.03, 1.9).translate(1.2, 0.02, 0.3);

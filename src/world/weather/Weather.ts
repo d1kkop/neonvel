@@ -181,7 +181,7 @@ export class Weather {
     this.t.road.uRain.value = c.rain;
     // Dry-ish road in clear weather, a wet mirror once it rains.
     const wetness = Math.min(1, c.rain * 1.4);
-    this.t.road.uReflectStrength.value = this.baseReflect * (0.3 + 0.7 * wetness);
+    this.t.road.uReflectStrength.value = this.baseReflect * (0.55 + 0.45 * wetness);
     this.t.road.uWetBias.value = this.baseWet - 0.35 * (1 - wetness); // fewer puddles when dry
     this.t.sky.uClouds.value = c.clouds;
     this.t.sky.uFlash.value = this.flash;

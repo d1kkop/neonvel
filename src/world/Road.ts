@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { applyAtmosphere, ATMOS_PARS, atmosphere, NOISE_GLSL } from '../render/atmosphere';
 import type { RoadStyleParams } from '../levels/types';
@@ -102,10 +103,37 @@ const RoadShader = {
       // Puddle mask: sharp mirror puddles vs rougher wet asphalt.
       float wb = clamp(uRain + uWetBias, -1.0, 1.0);
       float wet = smoothstep(0.42 - 0.3 * wb, 0.62 - 0.22 * wb, fbm(vWorld.xz * 0.06));
-      float grain = vnoise(vWorld.xz * 4.0);
-
-      // Asphalt base.
-      vec3 base = uAsphalt * (0.75 + 0.5 * grain);
+      // Asphalt, layered from metres down to millimetres. Each layer fades out once it gets smaller
+      // than a pixel (so the detail is sharp up close and never shimmers in the distance).
+      vec2 wp = vWorld.xz;
+      float px = max(length(fwidth(wp)), 1e-4); // metres per pixel here
+      #define LAYER(freq) (1.0 - smoothstep(0.25, 0.9, (freq) * px))
+      float grain = vnoise(wp * 4.0);
+      float macro = fbm(wp * 0.045);                                     // big tone drift / resurfacing
+      float mid = vnoise(wp * 11.0) * LAYER(11.0);
+      float agg = (vnoise(wp * 37.0) - 0.5) * LAYER(37.0) + (vnoise(wp * 95.0) - 0.5) * 0.7 * LAYER(95.0);
+      float stones = smoothstep(0.74, 0.86, vnoise(wp * 31.0 + 3.7)) * LAYER(31.0); // pale aggregate stones
+      float pits = smoothstep(0.78, 0.9, vnoise(wp * 61.0 + 9.1)) * LAYER(61.0);   // dark pores
+      vec3 base = uAsphalt * (0.72 + 0.35 * grain + 0.25 * (macro - 0.5) + 0.18 * (mid - 0.5) + 0.3 * agg);
+      base = mix(base, uAsphalt * 1.7 + vec3(0.01), stones * 0.35);
+      base *= 1.0 - pits * 0.45;
+      // Repaired patches: slightly darker, fresher rectangles of asphalt.
+      vec2 pc0 = floor(vec2(x * 0.35, along * 0.06));
+      float patchOn = step(0.86, hash21(pc0 + 11.0));
+      vec2 pf = fract(vec2(x * 0.35, along * 0.06));
+      float inPatch = patchOn * step(0.12, pf.x) * step(pf.x, 0.88) * step(0.15, pf.y) * step(pf.y, 0.8);
+      base *= 1.0 - 0.22 * inPatch;
+      // Wheel tracks: two polished, darker bands per lane.
+      float laneW0 = uRoadWidth / uLanes;
+      float lx = mod(x + hw, laneW0) / laneW0;
+      float wheel = exp(-pow((lx - 0.28) / 0.07, 2.0)) + exp(-pow((lx - 0.72) / 0.07, 2.0));
+      base *= 1.0 - 0.14 * wheel * (0.6 + 0.4 * vnoise(wp * 0.3));
+      // Cracks: thin dark meandering lines (sharp, anti-aliased).
+      float cn = vnoise(wp * 0.32) + 0.5 * vnoise(wp * 1.1 + 4.0);
+      float cw = fwidth(cn);
+      float crack = 1.0 - smoothstep(0.004, 0.004 + cw * 1.5, abs(cn - 0.74));
+      crack *= smoothstep(0.55, 0.8, vnoise(wp * 0.08 + 2.0)) * (1.0 - inPatch);
+      base *= 1.0 - 0.4 * crack;
 
       // Fake lamp light pools (lamps staggered on both sides).
       float mR = mod(along, uLightSpacing);
@@ -147,7 +175,8 @@ const RoadShader = {
         float dashOn = step(mod(along, 12.0), 6.0);
         dashes = max(dashes, band(x, cx, 0.09) * dashOn);
       }
-      float wear = 0.75 + 0.25 * vnoise(vWorld.xz * 2.0);
+      // Worn paint: patchy at the metre scale, speckled at the centimetre scale, darker where the stones show through.
+      float wear = (0.72 + 0.28 * vnoise(vWorld.xz * 2.0)) * (1.0 - 0.35 * smoothstep(0.55, 0.8, vnoise(vWorld.xz * 30.0)) * LAYER(30.0)) * (1.0 - 0.5 * pits);
       vec3 markCol = vec3(1.0, 0.5, 0.1) * edge * 0.9 + vec3(0.75, 0.75, 0.8) * dashes * 0.45;
       float mark = max(edge, dashes) * wear;
 
@@ -178,7 +207,7 @@ const RoadShader = {
       float reflAmt = uReflectStrength * fres * mix(0.45, 1.0, wet) * (1.0 - mark * 0.8);
       // Hills: the mirror plane follows the road under the car; where the road bends away from that plane
       // the reflection would be wrong, so it fades out instead.
-      if (uMirrorFade > 0.0) reflAmt *= 1.0 - smoothstep(0.25, 1.6, abs(dot(vWorld - uMirrorP, uMirrorN)));
+      if (uMirrorFade > 0.0) reflAmt *= 1.0 - smoothstep(0.6, 3.5, abs(dot(vWorld - uMirrorP, uMirrorN)));
 
       // Gutters darker/drier.
       float gutter = smoothstep(hw - 0.6, hw, abs(x));
@@ -274,6 +303,7 @@ export class Road {
     const dd = ROAD_STYLE.deckDepth;
     const concrete = applyAtmosphere(
       new THREE.MeshStandardMaterial({ color: st.concrete, roughness: 0.85, metalness: 0.1, side: THREE.DoubleSide }),
+      'concrete',
     );
     const wall = st.wallStyle ?? 'concrete';
     const neon = (c: THREE.Color, k: number) => {
@@ -286,7 +316,7 @@ export class Road {
     const deckProfile: [number, number][] = solidWalls
       ? [[-hw, -0.01], [-hw, wh], [-hw - t, wh], [-hw - t, -dd], [hw + t, -dd], [hw + t, wh], [hw, wh], [hw, -0.01]]
       : [[-hw - 0.01, -0.01], [-hw - t, -0.01], [-hw - t, -dd], [hw + t, -dd], [hw + t, -0.01], [hw + 0.01, -0.01]];
-    this.group.add(new THREE.Mesh(extrude(track, deckProfile, { step: 4 }), concrete));
+    this.group.add(new THREE.Mesh(extrude(track, deckProfile, { step: 1.5 }), concrete));
 
     if (solidWalls) {
       // Neon strips inside the walls and along the deck's outer edge (visible from across the city).
@@ -301,7 +331,7 @@ export class Road {
       const snow = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#f2f6ff', roughness: 0.95, side: THREE.DoubleSide }));
       for (const sd of [-1, 1]) {
         const prof: [number, number][] = [[sd * hw, wh + 0.02], [sd * (hw + 0.25), wh + 0.28], [sd * (hw + t + 0.4), wh + 0.18], [sd * (hw + t + 1.4), -0.4]];
-        this.group.add(new THREE.Mesh(extrude(track, sd < 0 ? prof : prof.slice().reverse(), { step: 3 }), snow));
+        this.group.add(new THREE.Mesh(extrude(track, sd < 0 ? prof : prof.slice().reverse(), { step: 1.5 }), snow));
       }
     } else if (wall === 'guardrail') {
       this.buildGuardrails(track, new THREE.Color(st.railColor ?? '#d8dde4'));
@@ -310,14 +340,14 @@ export class Road {
         color: st.railColor ?? '#88d8ff', metalness: 0.9, roughness: 0.05, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide,
       }));
       for (const sd of [-1, 1]) {
-        this.group.add(new THREE.Mesh(extrude(track, [[sd * (hw + 0.15), 0], [sd * (hw + 0.15), 1.4]], { step: 4 }), glass));
-        this.group.add(new THREE.Mesh(extrude(track, rectProfile(sd * (hw + 0.15), 1.45, 0.12, 0.1), { step: 4, closedProfile: true }), neon(sd < 0 ? leftNeon : rightNeon, 2.4 * st.neonIntensity)));
+        this.group.add(new THREE.Mesh(extrude(track, [[sd * (hw + 0.15), 0], [sd * (hw + 0.15), 1.4]], { step: 1.5 }), glass));
+        this.group.add(new THREE.Mesh(extrude(track, rectProfile(sd * (hw + 0.15), 1.45, 0.12, 0.1), { step: 1.5, closedProfile: true }), neon(sd < 0 ? leftNeon : rightNeon, 2.4 * st.neonIntensity)));
       }
     } else if (wall === 'rail') {
       // Cyber: no walls, just glowing light edges floating at the road border.
       for (const sd of [-1, 1]) {
-        this.group.add(new THREE.Mesh(extrude(track, rectProfile(sd * (hw + 0.1), 0.06, 0.25, 0.12), { step: 4, closedProfile: true }), neon(sd < 0 ? leftNeon : rightNeon, 3.2 * st.neonIntensity)));
-        this.group.add(new THREE.Mesh(extrude(track, rectProfile(sd * (hw + 0.1), 0.9, 0.06, 0.06), { step: 4, closedProfile: true }), neon(sd < 0 ? leftNeon : rightNeon, 2.0 * st.neonIntensity)));
+        this.group.add(new THREE.Mesh(extrude(track, rectProfile(sd * (hw + 0.1), 0.06, 0.25, 0.12), { step: 1.5, closedProfile: true }), neon(sd < 0 ? leftNeon : rightNeon, 3.2 * st.neonIntensity)));
+        this.group.add(new THREE.Mesh(extrude(track, rectProfile(sd * (hw + 0.1), 0.9, 0.06, 0.06), { step: 1.5, closedProfile: true }), neon(sd < 0 ? leftNeon : rightNeon, 2.0 * st.neonIntensity)));
       }
     }
 
@@ -364,31 +394,57 @@ export class Road {
   /** W-beam crash barrier on posts (ground-level roads). */
   private buildGuardrails(track: LoopTrack, color: THREE.Color): void {
     const hw = track.width / 2;
-    const metal = applyAtmosphere(new THREE.MeshStandardMaterial({ color, metalness: 0.7, roughness: 0.35, side: THREE.DoubleSide }));
+    const metal = applyAtmosphere(new THREE.MeshStandardMaterial({ color, metalness: 0.75, roughness: 0.3, side: THREE.DoubleSide }), 'metal');
+    const dark = applyAtmosphere(new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.55), metalness: 0.6, roughness: 0.45 }), 'metal');
     for (const sd of [-1, 1]) {
-      // Two-lobed W-beam profile.
+      // Smooth two-lobed W-beam (32 points) with the edges rolled back toward the posts.
       const L = sd * (hw + 0.35);
-      const prof: [number, number][] = [[L, 0.45], [L + sd * 0.08, 0.53], [L, 0.62], [L + sd * 0.08, 0.71], [L, 0.79]];
-      this.group.add(new THREE.Mesh(extrude(track, prof, { step: 3 }), metal));
+      const prof: [number, number][] = [];
+      prof.push([L + sd * 0.03, 0.44], [L + sd * 0.012, 0.447]);
+      for (let i = 0; i <= 32; i++) {
+        const t = i / 32;
+        prof.push([L + sd * 0.085 * Math.pow(Math.sin(t * Math.PI * 2), 2), 0.45 + t * 0.34]);
+      }
+      prof.push([L + sd * 0.012, 0.793], [L + sd * 0.03, 0.8]);
+      this.group.add(new THREE.Mesh(extrude(track, prof, { step: 1, smooth: true }), metal));
     }
+    // Posts: I-section (web + two flanges), a spacer block to the beam and two bolt heads per post.
+    const post = mergeGeometries([
+      new THREE.BoxGeometry(0.012, 0.85, 0.15).translate(0, 0.425, 0),
+      new THREE.BoxGeometry(0.1, 0.85, 0.012).translate(0, 0.425, 0.069),
+      new THREE.BoxGeometry(0.1, 0.85, 0.012).translate(0, 0.425, -0.069),
+      new THREE.BoxGeometry(0.06, 0.012, 0.15).translate(0, 0.85, 0), // cap
+    ]);
+    const block = new THREE.BoxGeometry(0.14, 0.26, 0.12).translate(0, 0.62, 0);
+    const bolts = mergeGeometries([
+      new THREE.CylinderGeometry(0.02, 0.02, 0.03, 12).rotateZ(Math.PI / 2).translate(0, 0.62, 0.045),
+      new THREE.CylinderGeometry(0.02, 0.02, 0.03, 12).rotateZ(Math.PI / 2).translate(0, 0.62, -0.045),
+    ]);
     const spacing = 4;
     const n = Math.floor(track.length / spacing) * 2;
-    const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.12, 0.85, 0.12).translate(0, 0.42, 0), metal, n);
+    const posts = new THREE.InstancedMesh(post, dark, n);
+    const blocks = new THREE.InstancedMesh(block, dark, n);
+    const boltMesh = new THREE.InstancedMesh(bolts, metal, n);
     const f = makeFrame();
-    const m = new THREE.Matrix4();
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
     let k = 0;
     for (let d = 0; d < track.length; d += spacing) {
       if (track.sectionAt(d, 2)) continue;
       track.frameAt(d, f);
+      q.setFromAxisAngle(up, Math.atan2(f.right.x, f.right.z) - Math.PI / 2); // local +x = across the road
       for (const sd of [-1, 1]) {
-        const lat = sd * (hw + 0.48);
-        m.makeTranslation(f.position.x + f.right.x * lat, f.position.y, f.position.z + f.right.z * lat);
-        posts.setMatrixAt(k++, m);
+        const at = (lat: number) => p.set(f.position.x + f.right.x * lat, f.position.y, f.position.z + f.right.z * lat);
+        posts.setMatrixAt(k, m.compose(at(sd * (hw + 0.56)), q, one));
+        blocks.setMatrixAt(k, m.compose(at(sd * (hw + 0.44)), q, one));
+        boltMesh.setMatrixAt(k, m.compose(at(sd * (hw + 0.35)), q, one));
+        k++;
       }
     }
-    posts.count = k;
-    posts.computeBoundingSphere();
-    this.group.add(posts);
+    for (const im of [posts, blocks, boltMesh]) {
+      im.count = k;
+      im.computeBoundingSphere();
+      this.group.add(im);
+    }
   }
 
   /** Short lantern posts (beach promenade style). */
@@ -396,10 +452,10 @@ export class Road {
     const hw = track.width / 2;
     const sp = 30;
     const n = Math.floor(track.length / sp) * 2;
-    const poleMat = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#f2efe8', roughness: 0.5, metalness: 0.3 }));
-    const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.08, 0.12, 4.2, 8).translate(0, 2.1, 0), poleMat, n);
+    const poleMat = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#f2efe8', roughness: 0.5, metalness: 0.3 }), 'metal');
+    const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.08, 0.12, 4.2, 20).translate(0, 2.1, 0), poleMat, n);
     const headMat = applyAtmosphere(new THREE.MeshBasicMaterial({ color: '#ffffff' }));
-    const heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.32, 12, 8).translate(0, 4.4, 0), headMat, n);
+    const heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.32, 32, 20).translate(0, 4.4, 0), headMat, n);
     const f = makeFrame();
     const m = new THREE.Matrix4();
     let k = 0;
@@ -455,7 +511,7 @@ export class Road {
     const perSide = Math.floor(track.length / sp);
     const total = perSide * 2;
     const box = new THREE.BoxGeometry(1, 1, 1);
-    const metal = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#15131c', roughness: 0.5, metalness: 0.6 }));
+    const metal = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#15131c', roughness: 0.5, metalness: 0.6 }), 'metal');
     const poles = new THREE.InstancedMesh(box, metal, total * 2);
     const heads = new THREE.InstancedMesh(box, applyAtmosphere(new THREE.MeshBasicMaterial({ color: '#ffffff' })), total);
     const frame = makeFrame();

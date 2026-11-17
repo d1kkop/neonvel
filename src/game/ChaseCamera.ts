@@ -8,6 +8,8 @@ export class ChaseCamera {
   distance = 7.5;
   height = 2.4;
   lookAhead = 10;
+  /** Aim point height above the car origin. */
+  lookHeight = 0.8;
   private readonly heading = new THREE.Vector3();
   private initialized = false;
   private readonly carFwd = new THREE.Vector3();
@@ -34,7 +36,7 @@ export class ChaseCamera {
     this.camera.position.copy(target.position).addScaledVector(this.heading, -this.distance);
     this.camera.position.y += this.height;
     this.look.copy(target.position).addScaledVector(this.lookDir, this.lookAhead);
-    this.look.y += 0.8;
+    this.look.y += this.lookHeight;
     this.camera.lookAt(this.look);
 
     const fov = 60 + speed01 * 14;

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { carModelFor } from './carModels';
+import { carModelFor, rimModelFor, RIM_MODEL_RADIUS } from './carModels';
 
 /**
  * Procedural retro car generator.
@@ -35,12 +35,15 @@ export interface CarStyle {
   features?: ('popups' | 'hoodScoop' | 'chromeBumpers' | 'rearSkirt' | 'flares' | 'roofSpoiler' | 'fin' | 'fenderPods' | 'vinylRoof' | 'chromeTrim' | 'louvers' | 'tailFins')[];
   /** Wheel-arch shape: 2 = round, 4–6 = squared-off 70s/80s arches. */
   archSquare?: number;
+  /** Rim design. */
+  rim?: RimStyle;
 }
 
 export const CAR_STYLES: Record<string, CarStyle> = {
   /** 80s notchback sports coupé: flat bonnet and slab sides, pop-up lamps, short boot with a lip. */
   wedge: {
     name: 'wedge',
+    rim: 'turbofan',
     length: 4.4,
     width: 1.86,
     body: [[0.0, 0.5, 0.26, 0.86], [0.03, 0.6, 0.22, 0.97], [0.3, 0.7, 0.21, 1.0], [0.62, 0.78, 0.21, 1.0], [0.95, 0.8, 0.22, 1.0], [1.0, 0.76, 0.3, 0.97]],
@@ -59,6 +62,7 @@ export const CAR_STYLES: Record<string, CarStyle> = {
   /** 70s muscle land yacht: endless bonnet with a scoop, slab sides, vinyl roof, chrome bumpers, fat rears. */
   muscle: {
     name: 'muscle',
+    rim: 'star5',
     length: 5.2,
     width: 2.0,
     body: [[0.0, 0.74, 0.3, 0.97], [0.02, 0.84, 0.26, 1.0], [0.45, 0.88, 0.24, 1.0], [0.82, 0.86, 0.24, 1.0], [0.99, 0.84, 0.28, 1.0], [1.0, 0.78, 0.34, 0.99]],
@@ -78,6 +82,7 @@ export const CAR_STYLES: Record<string, CarStyle> = {
   /** 70s fastback coupé: the soft one of the bunch, rear wheels behind skirts. */
   coupe: {
     name: 'coupe',
+    rim: 'spokes',
     length: 4.4,
     width: 1.86,
     body: [[0.0, 0.5, 0.28, 0.7], [0.05, 0.62, 0.23, 0.9], [0.28, 0.72, 0.21, 0.98], [0.55, 0.82, 0.21, 1.0], [0.88, 0.84, 0.23, 0.97], [1.0, 0.72, 0.32, 0.8]],
@@ -96,6 +101,7 @@ export const CAR_STYLES: Record<string, CarStyle> = {
   /** Short, tall rally hot hatch: a box with a square tailgate, bolted-on flares, roof spoiler. */
   hatch: {
     name: 'hatch',
+    rim: 'dish',
     length: 3.75,
     width: 1.82,
     body: [[0.0, 0.58, 0.28, 0.88], [0.04, 0.74, 0.24, 0.98], [0.25, 0.82, 0.22, 1.0], [0.92, 0.88, 0.22, 1.0], [1.0, 0.88, 0.28, 0.99]],
@@ -114,6 +120,7 @@ export const CAR_STYLES: Record<string, CarStyle> = {
   /** 80s personal-luxury coupé: very long and square, formal upright roof, vinyl top, chrome everywhere. */
   gt: {
     name: 'gt',
+    rim: 'mesh',
     length: 5.3,
     width: 1.98,
     body: [[0.0, 0.66, 0.26, 0.94], [0.02, 0.76, 0.23, 0.99], [0.4, 0.82, 0.22, 1.0], [0.78, 0.82, 0.22, 1.0], [0.98, 0.8, 0.26, 1.0], [1.0, 0.74, 0.32, 0.98]],
@@ -132,6 +139,7 @@ export const CAR_STYLES: Record<string, CarStyle> = {
   /** Boxy endurance racer: flat-sided tub, square fender boxes, slim canopy, tail fins, big wing. */
   proto: {
     name: 'proto',
+    rim: 'turbofan',
     length: 4.8,
     width: 2.04,
     body: [[0.0, 0.36, 0.18, 0.94], [0.05, 0.46, 0.15, 0.99], [0.2, 0.54, 0.14, 0.92], [0.38, 0.6, 0.14, 0.66], [0.62, 0.72, 0.14, 0.72], [0.8, 0.8, 0.16, 1.0], [1.0, 0.8, 0.26, 1.0]],
@@ -150,6 +158,7 @@ export const CAR_STYLES: Record<string, CarStyle> = {
   /** Angular mid-engine wedge: pinched waist, tall rear haunches, louvred engine cover, fin. */
   hyper: {
     name: 'hyper',
+    rim: 'star5',
     length: 4.6,
     width: 2.1,
     body: [[0.0, 0.4, 0.2, 0.86], [0.06, 0.5, 0.17, 0.96], [0.22, 0.6, 0.16, 1.0], [0.45, 0.68, 0.16, 0.88], [0.75, 0.9, 0.18, 1.0], [0.94, 0.9, 0.2, 1.0], [1.0, 0.86, 0.3, 0.96]],
@@ -168,6 +177,7 @@ export const CAR_STYLES: Record<string, CarStyle> = {
   /** 80s city bus: a long box with a glass band, big wheels. */
   bus: {
     name: 'bus',
+    rim: 'dish',
     length: 11,
     width: 2.5,
     body: [[0.0, 2.7, 0.45, 0.96], [0.012, 2.95, 0.42, 1.0], [0.985, 2.95, 0.42, 1.0], [1.0, 2.8, 0.45, 0.97]],
@@ -185,6 +195,7 @@ export const CAR_STYLES: Record<string, CarStyle> = {
   /** Origami wedge: all hard flat planes, low-poly octagonal sections, fully faceted. */
   razor: {
     name: 'razor',
+    rim: 'mesh',
     length: 4.5,
     width: 2.06,
     body: [[0.0, 0.36, 0.2, 0.8], [0.08, 0.48, 0.17, 0.94], [0.35, 0.66, 0.16, 1.0], [0.65, 0.84, 0.17, 1.0], [0.95, 0.86, 0.2, 1.0], [1.0, 0.84, 0.3, 0.97]],
@@ -333,45 +344,171 @@ const sidewallMat = () => (sidewall ??= new THREE.MeshStandardMaterial({ color: 
 let disc: THREE.MeshStandardMaterial | null = null;
 const discMat = () => (disc ??= new THREE.MeshStandardMaterial({ color: '#5a5c64', metalness: 0.9, roughness: 0.35 }));
 
-function buildWheel(radius: number, accent: THREE.Color, tireMat: THREE.Material, rimMat: THREE.Material): THREE.Group {
+export type RimStyle = 'turbofan' | 'mesh' | 'star5' | 'spokes' | 'dish';
+
+let barrel: THREE.MeshStandardMaterial | null = null;
+const barrelMat = () => (barrel ??= new THREE.MeshStandardMaterial({ color: '#202228', metalness: 0.8, roughness: 0.4, side: THREE.DoubleSide }));
+let lip: THREE.MeshStandardMaterial | null = null;
+const lipMat = () => (lip ??= new THREE.MeshStandardMaterial({ color: '#e4e7ee', metalness: 1, roughness: 0.06, envMapIntensity: 1.5, side: THREE.DoubleSide }));
+let cap: THREE.MeshStandardMaterial | null = null;
+const capMat = () => (cap ??= new THREE.MeshStandardMaterial({ color: '#101014', metalness: 0.5, roughness: 0.3, side: THREE.DoubleSide }));
+const accentMats = new Map<number, THREE.MeshBasicMaterial>();
+const accentMat = (c: THREE.Color) => {
+  const key = c.getHex();
+  let m = accentMats.get(key);
+  if (!m) accentMats.set(key, (m = new THREE.MeshBasicMaterial({ color: c.clone().multiplyScalar(2.2) })));
+  return m;
+};
+
+/** A part placed radially on the wheel face: geometry built pointing up (+Y) from the centre, rotated about X. */
+function radial(geo: THREE.BufferGeometry, angle: number, x: number): THREE.BufferGeometry {
+  return geo.clone().rotateX(angle).translate(x, 0, 0);
+}
+
+let wheelMaterial: THREE.MeshStandardMaterial | null = null;
+/**
+ * One material for every wheel in the game: colour, metalness / roughness and the neon glow come from vertex
+ * attributes (see bakeWheel), so a whole wheel is a single draw call instead of ten.
+ */
+function wheelMat(): THREE.MeshStandardMaterial {
+  if (wheelMaterial) return wheelMaterial;
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, envMapIntensity: 1.35 });
+  m.name = 'wheel';
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec2 aMR;\nattribute vec3 aEm;\nvarying vec2 vMR;\nvarying vec3 vEm;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMR = aMR;\nvEm = aEm;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vMR;\nvarying vec3 vEm;')
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = vMR.y;')
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = vMR.x;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vEm;');
+  };
+  return (wheelMaterial = m);
+}
+
+const bakedWheels = new Map<string, THREE.BufferGeometry>();
+/**
+ * Collapse a built wheel (tyre, sidewall, disc, barrel, lip, face, cap, nuts, neon ring: one mesh per material)
+ * into a single mesh. Each part's material is written into its vertices: colour, metalness + roughness, and
+ * unlit (glowing) parts as emissive. Identical wheels share one geometry (cached by `key`).
+ */
+function bakeWheel(g: THREE.Group, key: string): THREE.Group {
+  let geo = bakedWheels.get(key);
+  if (!geo) {
+    const parts: THREE.BufferGeometry[] = [];
+    for (const o of g.children) {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) continue;
+      m.updateMatrix();
+      let pg = m.geometry.clone().applyMatrix4(m.matrix);
+      if (pg.index) pg = pg.toNonIndexed();
+      for (const k of Object.keys(pg.attributes)) if (k !== 'position' && k !== 'normal') pg.deleteAttribute(k);
+      const n = pg.getAttribute('position').count;
+      const mat = m.material as THREE.MeshStandardMaterial & THREE.MeshBasicMaterial;
+      const lit = (mat as THREE.Material).type !== 'MeshBasicMaterial';
+      const col = new Float32Array(n * 3), mr = new Float32Array(n * 2), em = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        if (lit) {
+          col.set([mat.color.r, mat.color.g, mat.color.b], i * 3);
+          mr.set([mat.metalness ?? 0, mat.roughness ?? 1], i * 2);
+        } else {
+          mr.set([0, 1], i * 2);
+          em.set([mat.color.r, mat.color.g, mat.color.b], i * 3);
+        }
+      }
+      pg.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      pg.setAttribute('aMR', new THREE.BufferAttribute(mr, 2));
+      pg.setAttribute('aEm', new THREE.BufferAttribute(em, 3));
+      parts.push(pg);
+    }
+    geo = mergeGeometries(parts)!;
+    parts.forEach((x) => x.dispose());
+    bakedWheels.set(key, geo);
+  }
+  const out = new THREE.Group();
+  out.add(new THREE.Mesh(geo, wheelMat()));
+  return out;
+}
+
+/**
+ * Wheel with a period rim: low-profile tyre with a sidewall band, a deep rim barrel and lip, and one of five 80s
+ * faces (turbofan, cross-spoke mesh, 5-star, multi-spoke, slotted dish), plus a brake disc. The outer face is +X.
+ */
+function buildWheel(radius: number, accent: THREE.Color, tireMat: THREE.Material, rimMat: THREE.Material, style: RimStyle = 'star5'): THREE.Group {
   const g = new THREE.Group();
   const r = radius;
-  // Tyre: lathe of a rounded profile around the X axis.
-  const prof = [
-    [r * 0.62, -0.13], [r * 0.9, -0.145], [r * 0.99, -0.11], [r, -0.05], [r, 0.05], [r * 0.99, 0.11], [r * 0.9, 0.145], [r * 0.62, 0.13],
-  ].map(([a, b]) => new THREE.Vector2(a, b));
-  const tyre = new THREE.Mesh(new THREE.LatheGeometry(prof, 44).rotateZ(Math.PI / 2), tireMat);
-  g.add(tyre);
-  // Sidewall lettering band (slightly lighter rubber) and a drilled-look brake disc behind the spokes.
-  const band = new THREE.Mesh(new THREE.RingGeometry(r * 0.74, r * 0.84, 32).rotateY(Math.PI / 2), sidewallMat());
-  band.position.x = 0.148;
+  const rm = rimMat as THREE.MeshStandardMaterial;
+  const key = [r.toFixed(4), style, rm.color.getHexString(), rm.roughness, accent.getHexString(), rimModelFor(style) ? 'm' : 'p'].join('|');
+  if (bakedWheels.has(key)) return bakeWheel(g, key);
+  const rr = r * 0.7; // rim radius (low-profile tyre)
+  const prof = [[rr, -0.13], [r * 0.95, -0.14], [r * 0.995, -0.11], [r, -0.06], [r, 0.06], [r * 0.995, 0.11], [r * 0.95, 0.14], [rr, 0.13]]
+    .map(([a, b]) => new THREE.Vector2(a, b));
+  g.add(new THREE.Mesh(new THREE.LatheGeometry(prof, 64).rotateZ(Math.PI / 2), tireMat));
+  const band = new THREE.Mesh(new THREE.RingGeometry(rr * 1.08, rr * 1.22, 64).rotateY(Math.PI / 2), sidewallMat());
+  band.position.x = 0.142;
   g.add(band);
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.5, r * 0.5, 0.02, 24).rotateZ(Math.PI / 2), discMat());
-  disc.position.x = 0.07;
-  g.add(disc);
-  // Rim dish.
-  const rim = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.64, r * 0.6, 0.22, 24).rotateZ(Math.PI / 2), rimMat);
-  g.add(rim);
-  // Spokes (5) on the outer face.
-  const spokeGeo = new THREE.BoxGeometry(0.03, r * 1.15, 0.07);
-  for (let i = 0; i < 5; i++) {
-    const s = new THREE.Mesh(spokeGeo, rimMat);
-    s.rotation.x = (i / 5) * Math.PI;
-    s.position.x = 0.115;
-    g.add(s);
+  // Barrel (dark inside), polished lip, brake disc behind the face.
+  g.add(new THREE.Mesh(new THREE.CylinderGeometry(rr * 0.99, rr * 0.99, 0.24, 40, 1, true).rotateZ(Math.PI / 2), barrelMat()));
+  const lip = new THREE.Mesh(new THREE.TorusGeometry(rr * 0.97, 0.014, 10, 64).rotateY(Math.PI / 2), rimMat);
+  lip.position.x = 0.125;
+  g.add(lip);
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(rr * 0.82, rr * 0.82, 0.024, 32).rotateZ(Math.PI / 2), discMat());
+  disc.position.x = 0.02;
+  // Modelled rim (Blender): replaces the procedural barrel, lip and face.
+  const model = rimModelFor(style);
+  if (model) {
+    g.remove(g.children[g.children.length - 2], g.children[g.children.length - 1]); // procedural barrel + lip
+    g.add(disc);
+    const byName: Record<string, THREE.Material> = { rim: rimMat, lip: lipMat(), barrel: barrelMat(), cap: capMat(), nut: lipMat(), accent: accentMat(accent) };
+    const k = rr / RIM_MODEL_RADIUS;
+    for (const part of model) {
+      const name = (part.material as THREE.Material).name.replace(/\.\d+$/, '');
+      const m = new THREE.Mesh(part.geometry, byName[name] ?? rimMat);
+      m.name = 'rim'; // keep the shared geometry out of mergeStaticParts
+      m.scale.set(1, k, k);
+      g.add(m);
+    }
+    return bakeWheel(g, key);
   }
-  // Neon rim ring (glows, nice motion blur feel through bloom).
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(r * 0.63, 0.012, 6, 32).rotateY(Math.PI / 2),
-    new THREE.MeshBasicMaterial({ color: accent.clone().multiplyScalar(3) }),
-  );
-  ring.position.x = 0.12;
+  g.add(disc);
+  const face: THREE.BufferGeometry[] = [];
+  const x = 0.112;
+  if (style === 'turbofan') {
+    face.push(new THREE.CylinderGeometry(rr * 0.92, rr * 0.92, 0.018, 40).rotateZ(Math.PI / 2).translate(x - 0.012, 0, 0));
+    const blade = new THREE.BoxGeometry(0.028, rr * 0.46, rr * 0.13).rotateY(0.55).translate(0, rr * 0.6, 0);
+    for (let i = 0; i < 14; i++) face.push(radial(blade, (i / 14) * Math.PI * 2, x));
+  } else if (style === 'mesh') {
+    face.push(new THREE.TorusGeometry(rr * 0.9, 0.018, 10, 64).rotateY(Math.PI / 2).translate(x, 0, 0));
+    const bar = new THREE.BoxGeometry(0.016, rr * 1.8, 0.018);
+    for (let i = 0; i < 8; i++) {
+      face.push(radial(bar.clone().translate(0, 0, rr * 0.18), (i / 8) * Math.PI * 2, x));
+      face.push(radial(bar.clone().translate(0, 0, -rr * 0.18), (i / 8) * Math.PI * 2 + Math.PI / 8, x + 0.006));
+    }
+  } else if (style === 'spokes') {
+    const sp = new THREE.BoxGeometry(0.02, rr * 0.86, 0.032).translate(0, rr * 0.47, 0);
+    for (let i = 0; i < 10; i++) face.push(radial(sp, (i / 10) * Math.PI * 2, x));
+  } else if (style === 'dish') {
+    face.push(new THREE.CylinderGeometry(rr * 0.93, rr * 0.85, 0.03, 40).rotateZ(Math.PI / 2).translate(x - 0.006, 0, 0));
+  } else {
+    // 5-star: wide tapered spokes.
+    const sp = new THREE.CylinderGeometry(rr * 0.055, rr * 0.11, rr * 0.86, 4).rotateY(Math.PI / 4).scale(0.6, 1, 1.2).translate(0, rr * 0.47, 0);
+    for (let i = 0; i < 5; i++) face.push(radial(sp, (i / 5) * Math.PI * 2, x));
+  }
+  face.push(new THREE.CylinderGeometry(rr * 0.2, rr * 0.22, 0.05, 20).rotateZ(Math.PI / 2).translate(x + 0.01, 0, 0)); // centre cap
+  g.add(new THREE.Mesh(mergeGeometries(face.map((f) => (f.index ? f.toNonIndexed() : f)).map((f) => { for (const k of Object.keys(f.attributes)) if (k !== 'position' && k !== 'normal') f.deleteAttribute(k); return f; })), rimMat));
+  if (style === 'dish') {
+    // Slots in the dish.
+    const slot = new THREE.CylinderGeometry(rr * 0.11, rr * 0.11, 0.035, 12).rotateZ(Math.PI / 2).translate(0, rr * 0.56, 0);
+    const slots: THREE.BufferGeometry[] = [];
+    for (let i = 0; i < 8; i++) slots.push(radial(slot, (i / 8) * Math.PI * 2, x + 0.004).toNonIndexed());
+    g.add(new THREE.Mesh(mergeGeometries(slots), barrelMat()));
+  }
+  // Thin neon line on the lip (the game's glow).
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(rr * 0.99, 0.008, 8, 64).rotateY(Math.PI / 2), new THREE.MeshBasicMaterial({ color: accent.clone().multiplyScalar(2.2) }));
+  ring.position.x = 0.13;
   g.add(ring);
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.04, 12).rotateZ(Math.PI / 2), rimMat);
-  hub.position.x = 0.125;
-  g.add(hub);
-  mergeStaticParts(g);
-  return g;
+  return bakeWheel(g, key);
 }
 
 function airfoilGeometry(chord: number, thick: number, span: number): THREE.BufferGeometry {
@@ -602,7 +739,7 @@ const HEIGHT_SCALE: Record<string, number> = { bus: 1, wedge: 1.14, muscle: 1.16
 export function raiseStyle(st: CarStyle): CarStyle {
   const k = HEIGHT_SCALE[st.name] ?? 1.15;
   const lift = (rows: Station[]): Station[] => rows.map(([t, top, bottom, hw]) => [t, top * k, bottom * (1 + (k - 1) * 1.3), hw]);
-  return { ...st, body: lift(st.body), cabin: lift(st.cabin), wheelRadius: st.wheelRadius * (1 + (k - 1) * 0.45) };
+  return { ...st, body: lift(st.body), cabin: lift(st.cabin), wheelRadius: st.wheelRadius * (1 + (k - 1) * 0.7) };
 }
 
 export function buildCar(opts: CarOptions = {}): BuiltCar {
@@ -615,15 +752,16 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
 
   const tier = opts.tier ?? 'free';
   const paint = new THREE.MeshPhysicalMaterial({
-    color: opts.paint ?? '#c8ff00', metalness: 0.5, roughness: 0.4, clearcoat: 0.85, clearcoatRoughness: 0.12,
-    ...(tier === 'pro' ? { metalness: 0.75, roughness: 0.26, clearcoat: 1, clearcoatRoughness: 0.07 } : {}),
-    ...(tier === 'elite' ? { metalness: 0.85, roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.05, iridescence: 1, iridescenceIOR: 1.7, iridescenceThicknessRange: [180, 820] as [number, number] } : {}),
+    color: opts.paint ?? '#c8ff00', metalness: 0.6, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.25,
+    ...(tier === 'pro' ? { metalness: 0.75, roughness: 0.24, clearcoat: 1, clearcoatRoughness: 0.02 } : {}),
+    ...(tier === 'elite' ? { metalness: 0.85, roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.015, iridescence: 1, iridescenceIOR: 1.7, iridescenceThicknessRange: [180, 820] as [number, number] } : {}),
   });
-  const glass = new THREE.MeshPhysicalMaterial({ color: '#04060c', metalness: 0.9, roughness: 0.04, clearcoat: 1 });
+  const glass = new THREE.MeshPhysicalMaterial({ color: '#05070d', metalness: 0.92, roughness: 0.02, clearcoat: 1, clearcoatRoughness: 0, envMapIntensity: 1.6 });
   const trim = new THREE.MeshStandardMaterial({ color: '#0a090e', metalness: 0.4, roughness: 0.45 });
   const tyre = new THREE.MeshStandardMaterial({ color: '#0c0c0f', metalness: 0.0, roughness: 0.85 });
-  const rimMat = new THREE.MeshStandardMaterial({ color: '#2a2a33', metalness: 0.95, roughness: 0.2 });
-  const chrome = new THREE.MeshStandardMaterial({ color: '#c4c8d2', metalness: 1, roughness: 0.14 });
+  const rimMat = new THREE.MeshStandardMaterial({ color: tier === 'elite' ? '#2a2a30' : tier === 'pro' ? '#8a8e98' : '#c2c6ce', metalness: 0.95, roughness: tier === 'elite' ? 0.3 : 0.12, envMapIntensity: 1.3 });
+  const caliperMat = new THREE.MeshStandardMaterial({ color: tier === 'free' ? '#3a3c44' : new THREE.Color(accent).lerp(new THREE.Color('#ff2a3a'), 0.5), metalness: 0.4, roughness: 0.35 });
+  const chrome = new THREE.MeshStandardMaterial({ color: '#d8dce6', metalness: 1, roughness: 0.07, envMapIntensity: 1.4 });
   const soot = new THREE.MeshBasicMaterial({ color: '#020203' });
   const sootIn = new THREE.MeshBasicMaterial({ color: '#020203', side: THREE.BackSide });
   const carbon = new THREE.MeshStandardMaterial({ color: '#ffffff', map: carbonTexture(), metalness: 0.3, roughness: 0.35 });
@@ -635,7 +773,7 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
   car.name = `car-${style.name}`;
 
   const wheelZ = style.wheelT.map((t) => -L / 2 + t * L);
-  const wheelX = hwm - 0.16;
+  const wheelX = hwm - 0.13;
   const archR = R + 0.09;
   const feat = new Set(style.features ?? []);
   const wheelR = [R, R * (style.rearWheelScale ?? 1)];
@@ -711,7 +849,7 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
   // Wheel-well liners (dark arch lips).
   for (const wi of archP > 2.5 ? [] : wells) {
     for (const side of [-1, 1]) {
-      const lip = new THREE.Mesh(new THREE.TorusGeometry(archRs[wi] - 0.02, 0.03, 6, 20, Math.PI).rotateY(Math.PI / 2), trim);
+      const lip = new THREE.Mesh(new THREE.TorusGeometry(archRs[wi] - 0.02, 0.03, 12, 48, Math.PI).rotateY(Math.PI / 2), trim);
       lip.position.set(side * (hwm * 0.97), wheelR[wi], wheelZ[wi]);
       car.add(lip);
     }
@@ -724,9 +862,21 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
     for (const side of [-1, 1]) {
       const pivot = new THREE.Group();
       pivot.position.set(side * wheelX, wheelR[wi], wz);
-      const wheel = buildWheel(wheelR[wi], accent, tyre, rimMat);
+      const wheel = buildWheel(wheelR[wi], accent, tyre, rimMat, style.rim ?? 'star5');
       if (side < 0) wheel.rotation.y = Math.PI; // outer face outward
       pivot.add(wheel);
+      // Brake caliper behind the spokes (rear-top of the disc): steers with the wheel but must not spin —
+      // the game counter-rotates it (pivot.userData.caliper).
+      const rr = wheelR[wi] * 0.7;
+      // Modelled rims are concave (spokes ~5 cm deep at the hub): keep the caliper behind them.
+      const deep = !!rimModelFor(style.rim ?? 'star5');
+      const caliper = new THREE.Mesh(new THREE.BoxGeometry(deep ? 0.05 : 0.07, rr * 0.38, rr * 0.55), caliperMat);
+      caliper.position.set(side * (deep ? -0.004 : 0.045), rr * 0.5, rr * 0.48);
+      caliper.rotation.x = -0.75;
+      const calHolder = new THREE.Group();
+      calHolder.add(caliper);
+      pivot.add(calHolder);
+      pivot.userData.caliper = calHolder;
       car.add(pivot);
       wheels.push(pivot);
     }
@@ -863,7 +1013,7 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
     exhausts.push(new THREE.Vector3(x, ey, rz + 0.1));
     const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.065, 0.28, 18, 1, true).rotateX(Math.PI / 2), chrome);
     pipe.position.set(x, ey, rz - 0.05);
-    const lip = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.008, 6, 20), chrome);
+    const lip = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.008, 10, 40), chrome);
     lip.position.set(x, ey, rz + 0.09);
     const inner = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.22, 16, 1, true).rotateX(Math.PI / 2), sootIn);
     inner.position.set(x, ey, rz - 0.03);
@@ -1172,5 +1322,7 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
   car.traverse((o) => {
     if ((o as THREE.Mesh).isMesh) o.castShadow = false;
   });
+  // Glow sprites live on layer 1: drawn by the main and mirror cameras, skipped by the road reflection.
+  car.traverse((o) => { if ((o as THREE.Sprite).isSprite) o.layers.set(1); });
   return { group: car, wheels, style, setBrake, exhausts, tailLights };
 }

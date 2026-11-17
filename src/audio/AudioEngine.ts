@@ -36,6 +36,9 @@ export class AudioEngine {
   private musicBus: GainNode | null = null;
   private sfxBus: GainNode | null = null;
   private ambienceBus: GainNode | null = null;
+  /** Taps the music before the volume fader, so hit detection doesn't depend on the music volume. */
+  private musicAnalyser: AnalyserNode | null = null;
+  private bassBins: Float32Array<ArrayBuffer> | null = null;
   /** Called when the music title changes. */
   onMusicChange?: (title: string) => void;
   private muted = false;
@@ -98,10 +101,29 @@ export class AudioEngine {
     this.ui = new UiSounds(ctx, this.sfxBus);
     this.ambience = new Ambience(ctx, this.ambienceBus);
     this.ambience.set(this.pendingAmbience);
-    this.music = new Music(ctx, this.musicBus);
+    const musicTap = ctx.createGain();
+    musicTap.connect(this.musicBus);
+    this.musicAnalyser = ctx.createAnalyser();
+    this.musicAnalyser.fftSize = 1024;
+    this.musicAnalyser.smoothingTimeConstant = 0;
+    musicTap.connect(this.musicAnalyser);
+    this.bassBins = new Float32Array(this.musicAnalyser.frequencyBinCount);
+    this.music = new Music(ctx, musicTap);
     this.music.onChange = (title) => this.onMusicChange?.(title);
     void this.music.play(this.pendingMusic || 'space-city');
     if (this.pending) this.sfx.update(this.pending);
+  }
+
+  /** Low-end (kick drum, ~40–150 Hz) energy of the music right now, linear; 0 before audio starts. */
+  bassEnergy(): number {
+    const a = this.musicAnalyser, bins = this.bassBins;
+    if (!a || !bins || !this.ctx) return 0;
+    a.getFloatFrequencyData(bins);
+    const hz = this.ctx.sampleRate / a.fftSize;
+    const i0 = Math.max(1, Math.floor(40 / hz)), i1 = Math.max(i0 + 1, Math.ceil(150 / hz));
+    let e = 0;
+    for (let i = i0; i < i1; i++) e += Math.pow(10, bins[i] / 10); // dB → power
+    return e / (i1 - i0);
   }
 
   /** Call every frame. Safe to call before audio is unlocked. */

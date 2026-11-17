@@ -17,7 +17,7 @@ const std = (color: THREE.ColorRepresentation, o: THREE.MeshStandardMaterialPara
 const glowMat = (color: THREE.ColorRepresentation, k: number) => new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(k) });
 
 /** Cylinder from a to b (radius r), reusing one unit cylinder geometry. */
-const UNIT_CYL = () => new THREE.CylinderGeometry(1, 1, 1, 10).translate(0, 0.5, 0);
+const UNIT_CYL = () => new THREE.CylinderGeometry(1, 1, 1, 32).translate(0, 0.5, 0);
 const _a = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
 function stretch(mesh: THREE.Mesh, a: THREE.Vector3, b: THREE.Vector3, r: number): void {
   _a.copy(b).sub(a);
@@ -90,7 +90,7 @@ function astronaut(): THREE.Group {
   );
   visor.rotation.y = Math.PI; // the open phi range faces -Z (forward)
   visor.position.copy(helmet.position);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.035, 8, 20).rotateX(Math.PI / 2), dark);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.035, 12, 48).rotateX(Math.PI / 2), dark);
   ring.position.set(0, 0.9, 0.02);
   g.add(torso, pack, helmet, visor, ring);
   // Arms: one on the wheel, one resting on the door.
@@ -105,7 +105,7 @@ function astronaut(): THREE.Group {
   };
   arm(new THREE.Vector3(-0.27, 0.8, 0), new THREE.Vector3(-0.3, 0.6, -0.3), new THREE.Vector3(-0.12, 0.72, -0.55));
   arm(new THREE.Vector3(0.27, 0.8, 0), new THREE.Vector3(0.48, 0.58, -0.1), new THREE.Vector3(0.62, 0.62, -0.32));
-  const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.025, 8, 20), dark);
+  const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.025, 12, 48), dark);
   wheel.position.set(0, 0.74, -0.58);
   wheel.rotation.x = -0.5;
   g.add(wheel);
@@ -350,8 +350,8 @@ export class AlienCyclist extends Encounter {
     for (const hub of [rearHub, frontHub]) {
       const w = new THREE.Group();
       w.position.copy(hub);
-      w.add(new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.03, 8, 28).rotateY(Math.PI / 2), dark));
-      w.add(new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.012, 6, 28).rotateY(Math.PI / 2), chrome));
+      w.add(new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.03, 12, 64).rotateY(Math.PI / 2), dark));
+      w.add(new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.012, 10, 64).rotateY(Math.PI / 2), chrome));
       for (let i = 0; i < 8; i++) {
         const sp = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.62, 0.006), chrome);
         sp.rotation.x = (i / 8) * Math.PI;
@@ -377,7 +377,7 @@ export class AlienCyclist extends Encounter {
     eye.scale.z = 0.5;
     const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), new THREE.MeshBasicMaterial({ color: '#101010' }));
     pupil.position.set(0, 1.74, -0.37);
-    const goggles = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.025, 6, 26), dark);
+    const goggles = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.025, 12, 64), dark);
     goggles.position.copy(headM.position);
     goggles.rotation.x = 0.1;
     this.rig.add(torso, headM, eye, pupil, goggles);

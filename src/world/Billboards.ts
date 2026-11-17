@@ -16,6 +16,9 @@ interface Placement {
   poleH: number;
 }
 
+/** Atlases by design list: drawn and uploaded once, reused by every race (World.dispose skips them). */
+const atlasCache = new Map<string, { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture }>();
+
 const FRAME_COLORS = ['#ff2bd6', '#00e5ff', '#ffb000', '#a64dff', '#3dff9e'].map((c) => new THREE.Color(c));
 
 export class Billboards {
@@ -31,10 +34,20 @@ export class Billboards {
   constructor(track: LoopTrack, roofSpots: RoofSpot[], faceSpots: FaceSpot[], seed: number, designList: BillboardDesign[], private readonly style: 'neon' | 'underwater' = 'neon') {
     const rng = new Rng(seed ^ 0xb111b0a7);
     this.designCount = Math.max(1, Math.min(designList.length, ATLAS_COLS * ATLAS_ROWS));
-    this.canvas = drawAtlas(designList);
-    this.texture = new THREE.CanvasTexture(this.canvas);
-    this.texture.colorSpace = THREE.SRGBColorSpace;
-    this.texture.anisotropy = 8;
+    const key = designList.map((d) => d.name).join("|");
+    let atlas = atlasCache.get(key);
+    const fresh = !atlas;
+    if (!atlas) {
+      const canvas = drawAtlas(designList);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 16;
+      texture.userData.persistent = true;
+      atlas = { canvas, texture };
+      atlasCache.set(key, atlas);
+    }
+    this.canvas = atlas.canvas;
+    this.texture = atlas.texture;
 
     const placements: Placement[] = [];
     const frame = makeFrame();
@@ -72,7 +85,7 @@ export class Billboards {
 
     if (this.style === 'underwater') this.buildUnderwater(placements, rng);
     else this.build(placements, rng);
-    void this.loadCustomImages();
+    if (fresh) void this.loadCustomImages();
   }
 
   private build(list: Placement[], rng: Rng): void {
@@ -84,6 +97,8 @@ export class Billboards {
 
     const mat = new THREE.ShaderMaterial({
       uniforms: { ...atmosphere, uAtlas: { value: this.texture } },
+      // Pulled toward the camera in depth so it never fights the back panel far away.
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
       vertexShader: /* glsl */ `
         attribute float aCell;
         attribute float aSeed;
@@ -111,17 +126,26 @@ export class Billboards {
         void main() {
           float col = mod(vCell, ${ATLAS_COLS}.0);
           float row = floor(vCell / ${ATLAS_COLS}.0);
-          vec2 inset = vUv * 0.98 + 0.01;
+          // Keep samples away from the neighbouring atlas cells (more margin at low mip levels far away).
+          float m = clamp(max(fwidth(vUv.x), fwidth(vUv.y)) * 3.0, 0.01, 0.12);
+          vec2 inset = vUv * (1.0 - 2.0 * m) + m;
           vec2 auv = vec2((col + inset.x) / ${ATLAS_COLS}.0, (${ATLAS_ROWS}.0 - 1.0 - row + inset.y) / ${ATLAS_ROWS}.0);
           vec3 c = texture2D(uAtlas, auv).rgb * 1.6;
-          // Scanlines + occasional flicker.
-          c *= 0.88 + 0.12 * sin(vUv.y * 300.0);
+          // Scanlines (faded out once they get finer than a pixel: no shimmer at a distance) + occasional flicker.
+          float sl = vUv.y * 300.0;
+          float slFade = 1.0 - smoothstep(0.15, 0.45, fwidth(sl) / 6.2832);
+          c *= mix(0.94, 0.88 + 0.12 * sin(sl), slFade);
           float t = floor(uTime * 14.0);
-          float flick = h1(t + vSeed * 91.0) > 0.985 ? 0.25 : 1.0;
-          c *= flick;
+          // A tired neon tube blinking now and then: only on boards close by (from far away a whole board
+          // blinking reads as a rendering glitch), and a dip rather than a blackout.
+          float nearK = 1.0 - smoothstep(90.0, 220.0, distance(cameraPosition, vWorld));
+          float flick = h1(t + vSeed * 91.0) > 0.985 ? 0.55 : 1.0;
+          c *= mix(1.0, flick, nearK);
           // Neon frame.
           vec2 e = min(vUv, 1.0 - vUv);
-          float border = 1.0 - smoothstep(0.0, 0.025, min(e.x, e.y * 2.0));
+          float ed = min(e.x, e.y * 2.0);
+          float bw = max(0.025, fwidth(ed) * 1.5); // never thinner than ~1.5 px (anti-aliased)
+          float border = 1.0 - smoothstep(bw * 0.6, bw, ed);
           c = mix(c, vFrame * 4.0, border);
           gl_FragColor = vec4(applyAtmos(c, vWorld), 1.0);
         }`,
@@ -143,7 +167,7 @@ export class Billboards {
       m.makeBasis(xAxis, up, p.normal).scale(s.set(p.w, p.h, 1)).setPosition(center);
       boards.setMatrixAt(i, m);
       // Back panel.
-      const back = center.clone().addScaledVector(p.normal, -0.35);
+      const back = center.clone().addScaledVector(p.normal, -0.6); // front face 30 cm behind the screen
       m.makeBasis(xAxis, up, p.normal).scale(s.set(p.w + 0.6, p.h + 0.6, 0.6)).setPosition(back);
       structure.setMatrixAt(i * 3, m);
       // Two legs.
@@ -218,7 +242,7 @@ export class Billboards {
       const board = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
       g.add(board);
       const back = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, h + 0.5, 0.35), rust);
-      back.position.z = -0.25;
+      back.position.z = -0.45; // front face well behind the sign (no depth fighting far away)
       g.add(back);
       for (const [fw, fh, fx, fy] of [[w + 0.9, 0.35, 0, h / 2 + 0.3], [w + 0.9, 0.35, 0, -h / 2 - 0.3], [0.35, h + 0.9, w / 2 + 0.3, 0], [0.35, h + 0.9, -w / 2 - 0.3, 0]]) {
         const f = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, 0.5), rust);
@@ -226,15 +250,15 @@ export class Billboards {
         g.add(f);
       }
       for (const sx of [-1, 1]) {
-        const buoy = new THREE.Mesh(new THREE.SphereGeometry(1.1, 16, 12), buoyMat);
+        const buoy = new THREE.Mesh(new THREE.SphereGeometry(1.1, 48, 32), buoyMat);
         buoy.position.set(sx * w * 0.36, h / 2 + 1.4, 0);
-        const band = new THREE.Mesh(new THREE.CylinderGeometry(1.12, 1.12, 0.3, 16), bandMat);
+        const band = new THREE.Mesh(new THREE.CylinderGeometry(1.12, 1.12, 0.3, 48), bandMat);
         band.position.copy(buoy.position);
-        const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.9, 6), chainMat);
+        const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.9, 16), chainMat);
         rope.position.set(sx * w * 0.36, h / 2 + 0.55, 0);
         g.add(buoy, band, rope);
       }
-      const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 40, 6), chainMat);
+      const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 40, 16), chainMat);
       chain.position.set(0, -h / 2 - 20, -0.2);
       g.add(chain);
       // Bubbles rising from the board (simulated in the vertex shader, looping).

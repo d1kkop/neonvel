@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { ATMOS_PARS, atmosphere } from '../../render/atmosphere';
+import { ATMOS_PARS, atmosphere, NOISE_GLSL } from '../../render/atmosphere';
 import { loft } from '../../game/car/CarBuilder';
 import { LoopTrack, makeFrame, TrackFrame } from '../../track/Track';
 
@@ -12,18 +12,54 @@ import { LoopTrack, makeFrame, TrackFrame } from '../../track/Track';
 
 type Player = { s: number; x: number; v: number };
 
-/** Soft underwater lighting: wrapped sun from the surface, cyan/sand hemisphere, spec and rim. */
+/**
+ * Underwater skin lighting: wrapped sun from the surface, cyan/sand hemisphere, caustic light dancing over the
+ * upward-facing skin, a wet two-lobe specular, fresnel sheen and rim. `bumpK` adds fine skin relief.
+ */
 const SEA_SHADE = /* glsl */ `
+${NOISE_GLSL}
+float caustic(vec2 p, float t) {
+  // Two drifting ridged noise layers multiplied: the bright net of lines sunlight makes through waves.
+  float a = 1.0 - abs(vnoise(p * 0.9 + vec2(t * 0.35, t * 0.2)) * 2.0 - 1.0);
+  float b = 1.0 - abs(vnoise(p * 1.3 - vec2(t * 0.25, -t * 0.3) + 7.3) * 2.0 - 1.0);
+  return pow(a * b, 3.0);
+}
+vec3 skinBump(vec3 n, vec3 wp, float k) {
+  if (k <= 0.0) return n;
+  float h = vnoise(wp.xz * 9.0 + wp.y * 5.0) * 0.6 + vnoise(wp.zy * 23.0) * 0.4;
+  vec3 sx = dFdx(wp), sy = dFdy(wp);
+  vec3 r1 = cross(sy, n), r2 = cross(n, sx);
+  float det = dot(sx, r1);
+  vec3 grad = sign(det) * (dFdx(h) * r1 + dFdy(h) * r2) * k;
+  return normalize(abs(det) * n - grad);
+}
 vec3 seaShade(vec3 albedo, vec3 n, vec3 wp, float shine) {
   vec3 L = normalize(vec3(0.2, 1.0, 0.3));
   vec3 V = normalize(cameraPosition - wp);
-  float wrap = max((dot(n, L) + 0.45) / 1.45, 0.0);
-  vec3 hemi = mix(vec3(0.08, 0.17, 0.2), vec3(0.32, 0.56, 0.62), n.y * 0.5 + 0.5);
+  float ndl = dot(n, L);
+  float wrap = max((ndl + 0.45) / 1.45, 0.0);
+  vec3 hemi = mix(vec3(0.07, 0.15, 0.19), vec3(0.32, 0.56, 0.62), n.y * 0.5 + 0.5);
   vec3 H = normalize(L + V);
-  float spec = pow(max(dot(n, H), 0.0), 40.0) * shine;
-  float rim = pow(clamp(1.0 - dot(n, V), 0.0, 1.0), 3.0);
-  return albedo * (hemi + vec3(0.85, 0.97, 1.0) * wrap * 0.8) + vec3(0.75, 0.95, 1.0) * spec + vec3(0.25, 0.55, 0.65) * rim * 0.3;
+  float nh = max(dot(n, H), 0.0);
+  float spec = (pow(nh, 70.0) * 1.2 + pow(nh, 14.0) * 0.25) * shine;
+  float fres = pow(clamp(1.0 - dot(n, V), 0.0, 1.0), 4.0);
+  float cau = caustic(wp.xz * 0.35 + wp.y * 0.1, uTime) * smoothstep(-0.1, 0.6, n.y);
+  vec3 lit = albedo * (hemi + vec3(0.85, 0.97, 1.0) * wrap * 0.7 + vec3(0.7, 0.95, 1.0) * cau * 0.55);
+  return lit + vec3(0.75, 0.95, 1.0) * spec * 0.7 + vec3(0.25, 0.5, 0.6) * fres * (0.08 + 0.12 * shine);
 }`;
+
+/** A fin with real thickness: extruded and rounded off with a bevel. */
+function thickFin(pts: [number, number][], thick: number): THREE.BufferGeometry {
+  const sh = new THREE.Shape();
+  // Straight outline (a spline overshoots into loops at sharp fin tips); the bevel rounds the edges.
+  sh.moveTo(pts[0][0], pts[0][1]);
+  for (const [x, y] of pts.slice(1)) sh.lineTo(x, y);
+  sh.closePath();
+  const g = new THREE.ExtrudeGeometry(sh, { depth: thick * 0.4, bevelEnabled: true, bevelThickness: thick * 0.3, bevelSize: thick * 0.45, bevelSegments: 4, curveSegments: 28 });
+  g.translate(0, 0, -thick * 0.2);
+  g.deleteAttribute('uv');
+  return g.index ? g.toNonIndexed() : g;
+}
 
 /** Signed shortest distance a-b along a closed loop. */
 function loopDiff(a: number, b: number, length: number): number {
@@ -57,8 +93,8 @@ const _v = new THREE.Vector3();
 
 /** Lofted shark, 1 unit long, nose toward -Z. aJaw: 0 upper half, 1 lower half, 0.5 on the mouth seam. */
 export function sharkGeometry(): THREE.BufferGeometry {
-  const around = 24;
-  const along = 48;
+  const around = 64;
+  const along = 120;
   const body = loft(
     [
       [0.0, 0.025, -0.02, 0.05], [0.05, 0.07, -0.055, 0.5], [0.13, 0.105, -0.085, 0.82], [0.25, 0.125, -0.1, 1.0],
@@ -88,13 +124,13 @@ export function sharkGeometry(): THREE.BufferGeometry {
   }
   body.setAttribute('aJaw', new THREE.BufferAttribute(jaw, 1));
   const fin = (pts: [number, number][], z: number, rotZ = 0, y = 0) => {
-    const g = flatShape(pts).rotateY(Math.PI / 2).rotateZ(rotZ).translate(0, y, z).toNonIndexed();
+    const g = thickFin(pts, 0.012).rotateY(Math.PI / 2).rotateZ(rotZ).translate(0, y, z);
     g.setAttribute('aJaw', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count), 1));
     return g;
   };
   const parts = [
     body.toNonIndexed(),
-    fin([[0.06, 0], [-0.1, 0.17], [-0.02, 0.15], [-0.14, 0]], -0.04, 0, 0.1), // tall dorsal fin
+    fin([[0.06, 0], [-0.02, 0.15], [-0.1, 0.17], [-0.14, 0]], -0.04, 0, 0.1), // tall swept dorsal fin
     fin([[0, 0], [-0.16, 0.2], [-0.1, 0.02], [-0.13, -0.12]], 0.47), // crescent tail
     fin([[0, 0], [-0.17, -0.1], [-0.1, 0]], -0.12, 0.9, -0.04), // pectoral R
     fin([[0, 0], [-0.17, -0.1], [-0.1, 0]], -0.12, -0.9, -0.04), // pectoral L
@@ -139,9 +175,14 @@ function sharkMaterial(): THREE.ShaderMaterial {
       void main() {
         vec3 ln = normalize(vLN);
         if (!gl_FrontFacing) ln = -ln;
-        // Counter-shading: slate-blue back fading to a white belly.
-        float belly = smoothstep(-0.05, -0.35, ln.y);
-        vec3 col = mix(vec3(0.15, 0.21, 0.28), vec3(0.88, 0.9, 0.92), belly);
+        // Counter-shading: mottled slate-blue back fading (with a ragged edge) to a white belly.
+        float edge = (vnoise(vLocal.zx * 40.0) - 0.5) * 0.12;
+        float belly = smoothstep(-0.05, -0.32, ln.y + edge);
+        vec3 back = vec3(0.15, 0.21, 0.28) * (0.85 + 0.3 * vnoise(vLocal.zy * 60.0 + vLocal.x * 30.0));
+        vec3 col = mix(back, vec3(0.88, 0.9, 0.92), belly);
+        // Darker fin tips and a faint lateral line along the flank.
+        col *= 1.0 - 0.35 * smoothstep(0.12, 0.2, vLocal.y) - 0.3 * smoothstep(0.1, 0.18, abs(vLocal.z - 0.45) < 0.2 ? abs(vLocal.y) : 0.0);
+        col *= 1.0 - 0.18 * smoothstep(0.004, 0.0, abs(vLocal.y - 0.01 + (vLocal.z + 0.2) * 0.03)) * step(-0.2, vLocal.z) * step(0.02, abs(vLocal.x));
         // Gill slits.
         float gz = vLocal.z + 0.235;
         float gills = step(0.0, gz) * step(gz, 0.06) * step(0.72, fract(gz * 75.0)) * step(abs(vLocal.y), 0.035) * step(0.03, abs(vLocal.x));
@@ -160,7 +201,8 @@ function sharkMaterial(): THREE.ShaderMaterial {
         }
         vec3 n = normalize(vN);
         if (!gl_FrontFacing) n = -n;
-        gl_FragColor = vec4(applyAtmos(seaShade(col, n, vWorld, 0.3), vWorld), 1.0);
+        n = skinBump(n, vWorld, 0.012);
+        gl_FragColor = vec4(applyAtmos(seaShade(col, n, vWorld, 0.45), vWorld), 1.0);
       }`,
   });
 }
@@ -271,24 +313,24 @@ export class CirclingSharks {
 // ------------------------------------------------------------------ dolphins
 
 /** Lofted bottlenose dolphin, ~1 unit long, nose toward -Z. */
-function dolphinGeometry(): THREE.BufferGeometry {
+export function dolphinGeometry(): THREE.BufferGeometry {
   const body = loft(
     [
       // t, top, bottom, half-width  (beak → melon → body → tail stock)
       [0.0, 0.012, -0.012, 0.08], [0.06, 0.02, -0.025, 0.18], [0.11, 0.07, -0.05, 0.42], [0.2, 0.1, -0.08, 0.85],
       [0.42, 0.11, -0.095, 1.0], [0.65, 0.08, -0.07, 0.7], [0.85, 0.035, -0.03, 0.3], [1.0, 0.02, -0.015, 0.12],
     ],
-    { length: 1, halfWidth: 0.1, exp: 2.3, tumble: 0, along: 44, around: 18 },
+    { length: 1, halfWidth: 0.1, exp: 2.3, tumble: 0, along: 110, around: 56 },
   ).toNonIndexed();
-  const dorsal = flatShape([[0, 0], [0.05, 0.1], [0.13, 0.12], [0.1, 0.06], [0.14, 0]]).rotateY(Math.PI / 2).translate(0, 0.09, -0.05).toNonIndexed();
-  const flukes = flatShape([[0, 0], [-0.13, 0.07], [-0.11, 0.0], [0, 0.015], [0.11, 0.0], [0.13, 0.07]]).rotateX(-Math.PI / 2).translate(0, 0, 0.5).toNonIndexed();
-  const flipL = flatShape([[0, 0], [-0.1, -0.05], [-0.07, 0.01]]).rotateX(-Math.PI / 2 + 0.4).translate(-0.06, -0.05, -0.2).toNonIndexed();
-  const flipR = flatShape([[0, 0], [0.1, -0.05], [0.07, 0.01]]).rotateX(-Math.PI / 2 + 0.4).translate(0.06, -0.05, -0.2).toNonIndexed();
+  const dorsal = thickFin([[0, 0], [0.05, 0.1], [0.13, 0.12], [0.1, 0.06], [0.14, 0]], 0.012).rotateY(Math.PI / 2).translate(0, 0.09, -0.05);
+  const flukes = thickFin([[0, 0], [-0.13, 0.07], [-0.11, 0.0], [0, 0.015], [0.11, 0.0], [0.13, 0.07]], 0.01).rotateX(-Math.PI / 2).translate(0, 0, 0.5);
+  const flipL = thickFin([[0, 0], [-0.1, -0.05], [-0.07, 0.01]], 0.009).rotateX(-Math.PI / 2 + 0.4).translate(-0.06, -0.05, -0.2);
+  const flipR = thickFin([[0, 0], [0.1, -0.05], [0.07, 0.01]], 0.009).rotateX(-Math.PI / 2 + 0.4).translate(0.06, -0.05, -0.2);
   // Smooth loft normals are kept (no recompute after merging).
   return mergeGeometries([body, dorsal, flukes, flipL, flipR]);
 }
 
-function dolphinMaterial(): THREE.ShaderMaterial {
+export function dolphinMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
     uniforms: { ...atmosphere, uSwim: { value: 0 } },
@@ -315,15 +357,20 @@ function dolphinMaterial(): THREE.ShaderMaterial {
         vec3 ln = normalize(vLN);
         if (!gl_FrontFacing) ln = -ln;
         // Grey back, pale belly; a darker "smiling" mouth line along the beak.
-        float belly = smoothstep(0.05, -0.45, ln.y);
-        vec3 col = mix(vec3(0.42, 0.5, 0.58), vec3(0.9, 0.92, 0.94), belly);
+        float belly = smoothstep(0.05, -0.45, ln.y + (vnoise(vLocal.zx * 30.0) - 0.5) * 0.08);
+        vec3 col = mix(vec3(0.3, 0.37, 0.45), vec3(0.88, 0.9, 0.92), belly);
+        // Darker cape along the back from the melon to behind the dorsal fin, and a blowhole.
+        float cape = smoothstep(0.35, 0.75, ln.y) * smoothstep(-0.42, -0.3, vLocal.z) * smoothstep(0.25, 0.05, vLocal.z);
+        col = mix(col, vec3(0.16, 0.2, 0.27), cape * 0.8);
+        col *= 1.0 - 0.6 * smoothstep(0.008, 0.004, length(vec2(vLocal.x, vLocal.z + 0.31))) * step(0.05, vLocal.y);
         float mouth = smoothstep(0.006, 0.0, abs(vLocal.y + 0.008 - (vLocal.z + 0.5) * 0.06)) * step(vLocal.z, -0.38);
         col = mix(col, vec3(0.15, 0.18, 0.22), mouth);
         float eye = smoothstep(0.012, 0.006, length(vec2(abs(vLocal.x) - 0.045, vLocal.y - 0.025))) * step(abs(vLocal.z + 0.37), 0.015);
         col = mix(col, vec3(0.02), eye);
         vec3 n = normalize(vN);
         if (!gl_FrontFacing) n = -n;
-        gl_FragColor = vec4(applyAtmos(seaShade(col, n, vWorld, 0.6), vWorld), 1.0);
+        n = skinBump(n, vWorld, 0.006);
+        gl_FragColor = vec4(applyAtmos(seaShade(col, n, vWorld, 0.8), vWorld), 1.0);
       }`,
   });
 }
@@ -428,13 +475,23 @@ export class DolphinPod {
     this.dolphins.forEach((d, i) => {
       const ph = time * 1.6 + d.phase;
       const panic = Math.min(fleeT, 1);
-      // Acrobatics while playing: full barrel rolls and leaping somersaults, each dolphin on its own rhythm.
+      // Acrobatics while playing, each dolphin on its own random rhythm: mostly rolls (a slow full barrel roll,
+      // or a half roll onto the back and back again, either way round), and only now and then a leaping
+      // somersault.
       const play = calm * arrive;
-      const ru = (time / 5.5 + d.phase * 0.31) % 1;
-      const rollA = ru < 0.18 ? THREE.MathUtils.smootherstep(ru, 0, 0.18) * tau * (i % 2 ? -1 : 1) * play : 0;
-      const fu = (time / 7.3 + d.phase * 0.53 + 0.5) % 1;
-      const flipA = fu < 0.16 ? THREE.MathUtils.smootherstep(fu, 0, 0.16) * tau * play : 0;
-      const leap = fu < 0.16 ? Math.sin((fu / 0.16) * Math.PI) * 3.2 * play : 0;
+      const h01 = (a: number, b: number) => { const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return x - Math.floor(x); };
+      const rc = time / 3.2 + d.phase * 0.31;
+      const rk = Math.floor(rc), ru = rc - rk;
+      const rr = h01(rk, i), rdir = h01(rk, i + 3) < 0.5 ? -1 : 1;
+      let rollA = 0;
+      if (rr < 0.45) rollA = ru < 0.4 ? THREE.MathUtils.smootherstep(ru, 0, 0.4) * tau : 0; // full roll
+      else if (rr < 0.8) rollA = ru < 0.55 ? Math.sin((ru / 0.55) * Math.PI) * Math.PI * THREE.MathUtils.smoothstep(ru, 0, 0.1) : 0; // belly-up and back
+      rollA *= rdir * play;
+      const fc = time / 24 + d.phase * 0.53 + 0.5;
+      const fk = Math.floor(fc), fu = fc - fk;
+      const flipOn = h01(fk, i + 7) < 0.4 && fu < 0.06;
+      const flipA = flipOn ? THREE.MathUtils.smootherstep(fu, 0, 0.06) * tau * play : 0;
+      const leap = flipOn ? Math.sin((fu / 0.06) * Math.PI) * 3.2 * play : 0;
       const along = -16 * (1 - arrive) + 6 + i * 4 + Math.sin(ph * 0.7) * 3 * calm + fleeAlong * (1 + i * 0.07) + leave * 30;
       const zig = Math.sin(fleeT * 5 + i * 2) * 2.5 * panic;
       const lateral = side * (hw + 7 + Math.cos(ph) * 2.2 * calm + i * 1.6 + fleeOut + zig + leave * 25);

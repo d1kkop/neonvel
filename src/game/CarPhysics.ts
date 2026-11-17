@@ -208,14 +208,28 @@ export function stepPhys(c: CarPhys, inp: InputState & { handbrake?: number; boo
   // --- Walls
   // The body is turned on the track (heading + drift angle): its corner sticks out further than the plain
   // half width, so the wall stop uses the rotated footprint (otherwise the tail swings through the wall).
-  const yawOnTrack = Math.min(0.9, Math.abs(c.psi + c.driftAngle));
-  const extent = spec.halfWidth * Math.cos(yawOnTrack) + (spec.length / 2) * Math.sin(yawOnTrack) * 0.85;
-  const limit = track.width / 2 - Math.max(spec.halfWidth, extent) - 0.25;
+  // Same geometry as the renderer (World.placeCars): the body is yawed by psi + driftAngle around a pivot
+  // 0.28·L ahead of the centre, so in a drift the tail reaches out much further than half a car length.
+  const psiB = c.psi + c.driftAngle;
+  const sb = Math.sin(psiB), cb = Math.cos(psiB);
+  const pa = spec.length * 0.28;
+  const pivotLat = pa * Math.sin(c.psi) - pa * sb;
+  let reachR = -Infinity, reachL = -Infinity;
+  for (const along of [spec.length / 2, -spec.length / 2]) {
+    for (const across of [spec.halfWidth, -spec.halfWidth]) {
+      const lat = pivotLat + along * sb + across * cb;
+      reachR = Math.max(reachR, lat);
+      reachL = Math.max(reachL, -lat);
+    }
+  }
+  const edge = track.width / 2 - 0.25;
+  const limitR = edge - Math.max(spec.halfWidth, reachR);
+  const limitL = edge - Math.max(spec.halfWidth, reachL);
   const wasOnWall = c.onWall;
   c.onWall = false;
-  if (Math.abs(c.x) > limit) {
-    const side = Math.sign(c.x);
-    c.x = side * limit;
+  if (c.x > limitR || c.x < -limitL) {
+    const side = c.x > limitR ? 1 : -1;
+    c.x = side > 0 ? limitR : -limitL;
     const along = c.v * Math.cos(c.phi);
     const lat = c.v * Math.sin(c.phi);
     if (lat * side > 0) {

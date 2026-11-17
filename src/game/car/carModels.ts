@@ -10,7 +10,26 @@ const AVAILABLE = ['wedge', 'muscle', 'coupe', 'hatch', 'gt', 'razor', 'proto', 
 const STYLE_FOR: Record<string, string> = {}; // body style → model file (default: same name)
 
 const models = new Map<string, THREE.Object3D>();
+/** Rim designs (tools/blender/rims.py): style → its meshes (one per material), modelled for RIM_MODEL_RADIUS. */
+const rims = new Map<string, THREE.Mesh[]>();
+/** Lip radius the rims were modelled at (the car builder scales them to its own rim radius). */
+export const RIM_MODEL_RADIUS = 0.27;
 let loading: Promise<void> | null = null;
+
+/** gltfpack stores quantised (normalized int) attributes: turn them back into plain floats. */
+function dequantise(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    for (const [key, attr] of Object.entries(m.geometry.attributes)) {
+      const a = attr as THREE.BufferAttribute;
+      if (a.array instanceof Float32Array && !a.normalized) continue;
+      const f = new Float32Array(a.count * a.itemSize);
+      for (let i = 0; i < a.count; i++) for (let c = 0; c < a.itemSize; c++) f[i * a.itemSize + c] = a.getComponent(i, c);
+      m.geometry.setAttribute(key, new THREE.BufferAttribute(f, a.itemSize));
+    }
+  });
+}
 
 /** Start (or join) loading every model. Resolves when all have loaded or failed. */
 export function preloadCarModels(): Promise<void> {
@@ -21,22 +40,30 @@ export function preloadCarModels(): Promise<void> {
       AVAILABLE.map((name) =>
         loader.loadAsync(`${base}models/cars/${name}.glb`)
           .then((g) => {
-            // gltfpack stores quantised (normalized int) attributes: turn them back into plain floats so the
-            // car builder can merge them with its own procedural parts.
-            g.scene.traverse((o) => {
-              const m = o as THREE.Mesh;
-              if (!m.isMesh) return;
-              for (const [key, attr] of Object.entries(m.geometry.attributes)) {
-                const a = attr as THREE.BufferAttribute;
-                if (a.array instanceof Float32Array && !a.normalized) continue;
-                const f = new Float32Array(a.count * a.itemSize);
-                for (let i = 0; i < a.count; i++) for (let c = 0; c < a.itemSize; c++) f[i * a.itemSize + c] = a.getComponent(i, c);
-                m.geometry.setAttribute(key, new THREE.BufferAttribute(f, a.itemSize));
-              }
-            });
+            dequantise(g.scene); // so the car builder can merge them with its own procedural parts
             models.set(name, g.scene);
           })
           .catch(() => undefined), // fall back to the procedural body
+      ).concat(
+        loader.loadAsync(`${base}models/wheels/rims.glb`)
+          .then((g) => {
+            dequantise(g.scene);
+            g.scene.updateMatrixWorld(true);
+            g.scene.traverse((o) => {
+              const style = /^rim_([a-z0-9]+)/.exec(o.name)?.[1];
+              if (!style || rims.has(style)) return;
+              // The rim's meshes (one per material), with their transform baked in.
+              const parts: THREE.Mesh[] = [];
+              o.traverse((c) => {
+                const m = c as THREE.Mesh;
+                if (!m.isMesh) return;
+                const mesh = new THREE.Mesh(m.geometry.clone().applyMatrix4(m.matrixWorld), m.material);
+                parts.push(mesh);
+              });
+              if (parts.length) rims.set(style, parts);
+            });
+          })
+          .catch(() => undefined), // fall back to the procedural rims
       ),
     ).then(() => undefined);
   }
@@ -47,4 +74,9 @@ export function preloadCarModels(): Promise<void> {
 export function carModelFor(styleName: string): THREE.Object3D | null {
   const m = models.get(STYLE_FOR[styleName] ?? styleName);
   return m ? m.clone(true) : null;
+}
+
+/** The modelled rim for a rim style (shared geometry: do not modify), or null when there is none. */
+export function rimModelFor(style: string): THREE.Mesh[] | null {
+  return rims.get(style) ?? null;
 }

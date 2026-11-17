@@ -58,13 +58,13 @@ const DEFAULTS: Settings = {
   driveMode: 'grip',
   opponents: 3,
   mode: 'race',
-  vhs: true,
+  vhs: false, // optional (Options → VHS look)
   difficulty: 'normal',
   matchWait: 30,
   serverUrl: `ws://${location.hostname || 'localhost'}:8787`,
   rating: START_RATING,
   games: 0,
-  version: 4,
+  version: 5,
 };
 
 export function loadSettings(): Settings {
@@ -92,6 +92,11 @@ export function loadSettings(): Settings {
         s.weather = {};
         s.fog = {};
         s.version = 4;
+      }
+      // v5: the VHS distortion is optional now and off by default.
+      if (s.version < 5) {
+        s.vhs = false;
+        s.version = 5;
       }
       return s;
     }

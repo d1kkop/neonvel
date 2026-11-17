@@ -43,9 +43,17 @@ export const orbitRun: LevelDef = {
   build(ctx) {
     const { track, scene } = ctx;
     const rng = new Rng(ctx.seed);
-    scene.add(createPlanet(new THREE.Vector3(2600, 500, -3200), 900, '#d89a5a', '#7a4a2a', true));
-    scene.add(createPlanet(new THREE.Vector3(-2400, -300, 1800), 320, '#4a8ad8', '#e8f4ff'));
-    scene.add(createPlanet(new THREE.Vector3(600, 1300, 2600), 140, '#8a8a90', '#5a5a60'));
+    // A whole system: ringed gas giant with a cratered moon, an ice giant, an Earth-like world, a lava world,
+    // a ringed ice moon and a few small rocky bodies, spread all around (and above / below) the track.
+    scene.add(createPlanet(new THREE.Vector3(2600, 500, -3200), 900, '#d89a5a', '#7a4a2a', true, 'gas', 0));
+    scene.add(createPlanet(new THREE.Vector3(1500, 1150, -2300), 150, '#b8b4ac', '#6a6660', false, 'rocky', 3.1));
+    scene.add(createPlanet(new THREE.Vector3(-2400, -300, 1800), 320, '#4a8ad8', '#e8f4ff', false, 'gas', 1));
+    scene.add(createPlanet(new THREE.Vector3(-3600, 700, -1600), 560, '#4a9aff', '#2a6ad8', false, 'terran', 5.7));
+    scene.add(createPlanet(new THREE.Vector3(2000, -700, 3500), 260, '#ffb040', '#ff3010', false, 'lava', 8.2));
+    scene.add(createPlanet(new THREE.Vector3(-1300, 1500, -3700), 300, '#d8ecff', '#4a7ab8', true, 'ice', 2.4));
+    scene.add(createPlanet(new THREE.Vector3(600, 1300, 2600), 140, '#9a968e', '#5a5850', false, 'rocky', 6.6));
+    scene.add(createPlanet(new THREE.Vector3(3700, -200, 1200), 90, '#c8a888', '#6a5040', false, 'rocky', 11.3));
+    scene.add(createPlanet(new THREE.Vector3(-3000, -900, -300), 120, '#cfe4ff', '#5a8ac8', false, 'ice', 13.9));
 
     // Asteroid belt around (and below / above) the track.
     const rocks: Placement[] = [];
@@ -59,10 +67,10 @@ export const orbitRun: LevelDef = {
     scene.add(createAsteroids(rocks));
 
     // Space-station rings around the road at intervals.
-    const ringGeo = new THREE.TorusGeometry(16, 0.9, 10, 48);
+    const ringGeo = new THREE.TorusGeometry(16, 0.9, 24, 160);
     const ringMat = new THREE.MeshStandardMaterial({ color: '#3a3a48', metalness: 0.8, roughness: 0.35 });
     const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#00e5ff').multiplyScalar(3) });
-    const glowGeo = new THREE.TorusGeometry(15.2, 0.15, 6, 48);
+    const glowGeo = new THREE.TorusGeometry(15.2, 0.15, 12, 160);
     const f = { position: new THREE.Vector3(), forward: new THREE.Vector3(), right: new THREE.Vector3(), up: new THREE.Vector3() };
     for (let d = 120; d < track.length; d += 210) {
       if (track.sectionAt(d, 20)) continue;

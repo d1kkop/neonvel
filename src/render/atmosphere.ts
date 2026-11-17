@@ -17,6 +17,8 @@ export const atmosphere = {
   /** Ground-mist amount (0..1) and its lit colour (see GroundMist). */
   uMist: { value: 0 },
   uMistColor: { value: new THREE.Color('#80708a') },
+  /** 0..1 flash on the music's harder kicks (set by World every frame). */
+  uBeatHit: { value: 0 },
 };
 
 export const ATMOS_PARS = /* glsl */ `
@@ -30,6 +32,7 @@ uniform vec3 uMoonDir;
 uniform float uCaustics;
 uniform float uMist;
 uniform vec3 uMistColor;
+uniform float uBeatHit;
 
 float causticLayer(vec2 uv, float t) {
   vec2 p = mod(uv * 6.28318, 6.28318) - 250.0;
@@ -84,9 +87,39 @@ float fbm(vec2 p) {
 
 /**
  * Patch a built-in material (MeshStandardMaterial etc.) so it uses our atmosphere instead of
- * three's fog. Works with instancing.
+ * three's fog. Works with instancing. `detail` adds world-space surface detail (no UVs needed),
+ * each layer fading out below pixel size so it stays sharp up close without shimmering.
  */
-export function applyAtmosphere<T extends THREE.Material>(mat: T): T {
+export type SurfaceDetail = 'concrete' | 'metal';
+
+const DETAIL_GLSL: Record<SurfaceDetail, string> = {
+  concrete: /* glsl */ `
+    float d = 1.0;
+    d *= 0.88 + 0.24 * fbm(tp * 0.08);                                    // big stains / tone drift
+    d *= 1.0 + 0.16 * (vnoise(tp * 1.3) - 0.5) * LAYER(1.3);
+    d *= 1.0 + 0.14 * (vnoise(tp * 5.0) - 0.5) * LAYER(5.0);
+    d *= 1.0 + 0.12 * (vnoise(tp * 19.0) - 0.5) * LAYER(19.0);
+    d *= 1.0 - 0.35 * smoothstep(0.8, 0.92, vnoise(tp * 41.0 + 3.0)) * LAYER(41.0); // air pockets
+    // Rain streaks running down vertical faces.
+    float vert = 1.0 - an.y;
+    d *= 1.0 - 0.18 * vert * smoothstep(0.5, 0.85, vnoise(vec2((wpos.x + wpos.z) * 2.3, wpos.y * 0.15)));
+    // Formwork joints every 1.5 m on vertical faces.
+    float jy = abs(fract(wpos.y / 1.5) - 0.5);
+    d *= 1.0 - 0.25 * vert * (1.0 - smoothstep(0.0, max(fwidth(wpos.y / 1.5) * 1.5, 0.004), 0.5 - jy));
+    diffuseColor.rgb *= d;
+    detailRough = 0.85 + 0.3 * vnoise(tp * 3.0);
+  `,
+  metal: /* glsl */ `
+    float d = 1.0;
+    d *= 0.9 + 0.2 * fbm(tp * 0.3);
+    d *= 1.0 + 0.1 * (vnoise(vec2(tp.x * 2.0, tp.y * 60.0)) - 0.5) * LAYER(60.0);   // rolled grain
+    d *= 1.0 - 0.25 * smoothstep(0.7, 0.9, vnoise(tp * 2.2 + 7.0)) * LAYER(2.2);    // grime spots
+    diffuseColor.rgb *= d;
+    detailRough = 0.75 + 0.5 * vnoise(tp * 1.7) * LAYER(1.7) + 0.25 * (1.0 - LAYER(1.7));
+  `,
+};
+
+export function applyAtmosphere<T extends THREE.Material>(mat: T, detail?: SurfaceDetail): T {
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, atmosphere);
     shader.vertexShader = shader.vertexShader
@@ -105,6 +138,26 @@ export function applyAtmosphere<T extends THREE.Material>(mat: T): T {
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\nvarying vec3 vAtmosWorld;\n${ATMOS_PARS}`)
       .replace('#include <fog_fragment>', 'gl_FragColor.rgb = applyAtmos(gl_FragColor.rgb, vAtmosWorld);');
+    if (detail) {
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${NOISE_GLSL}\nfloat detailRough = 1.0;`)
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          {
+            vec3 wpos = vAtmosWorld;
+            vec3 wn = normalize(cross(dFdx(wpos), dFdy(wpos)));
+            vec3 an = abs(wn);
+            vec2 tp = an.y > max(an.x, an.z) ? wpos.xz : (an.x > an.z ? wpos.zy : wpos.xy);
+            float px = max(length(fwidth(tp)), 1e-4);
+            #define LAYER(f) (1.0 - smoothstep(0.25, 0.9, (f) * px))
+            ${DETAIL_GLSL[detail]}
+            #undef LAYER
+          }`,
+        )
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = clamp(roughnessFactor * detailRough, 0.04, 1.0);');
+    }
   };
+  if (detail) mat.customProgramCacheKey = () => 'atmos-' + detail;
   return mat;
 }

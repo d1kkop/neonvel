@@ -22,11 +22,21 @@ export interface EngineProfile {
   crackle: number;
   /** Overall brightness 0..1. */
   bright: number;
+  /** Diesel: sharp combustion knock on every firing ("clatter") 0..1. */
+  diesel?: number;
+  /** Intake / induction roar under load 0..1. */
+  intake?: number;
+  /** Big engine cooling fan hum (buses) 0..1. */
+  fan?: number;
+  /** Air brakes: "pssht" when the vehicle comes to a stop. */
+  airBrakes?: boolean;
 }
 
 const even = (n: number) => Array.from({ length: n }, (_, i) => 1 - (i % 2) * 0.04);
 
 export const ENGINES: Record<string, EngineProfile> = {
+  // City bus: turbo inline-6 diesel — low revs, knock on every firing, deep drone, turbo whistle, cooling fan.
+  diesel6: { name: 'Turbo-diesel inline-6', cylinders: 6, firing: [1, 0.9, 0.97, 0.88, 1, 0.92], resonances: [[68, 9], [210, 6], [1900, 5]], pipeMs: 6.5, pipeFeedback: 0.5, rasp: 0.3, redline: 2300, idle: 600, turbo: 0.9, crackle: 0, bright: 0.3, diesel: 0.9, intake: 0.5, fan: 0.6, airBrakes: true },
   flat12: { name: 'Flat-12', cylinders: 12, firing: even(12), resonances: [[190, 6], [640, 5], [1700, 4]], pipeMs: 2.4, pipeFeedback: 0.45, rasp: 0.25, redline: 8800, idle: 950, turbo: 0, crackle: 0.25, bright: 0.75 },
   v8muscle: { name: 'Big-block V8', cylinders: 8, firing: [1, 0.58, 0.92, 0.52, 1, 0.68, 0.86, 0.6], resonances: [[105, 9], [360, 5], [880, 3]], pipeMs: 4.8, pipeFeedback: 0.62, rasp: 0.55, redline: 6400, idle: 750, turbo: 0, crackle: 0.95, bright: 0.35 },
   inline6: { name: 'Inline-6', cylinders: 6, firing: even(6), resonances: [[160, 6], [520, 5], [1350, 4]], pipeMs: 3.0, pipeFeedback: 0.5, rasp: 0.18, redline: 7400, idle: 850, turbo: 0.15, crackle: 0.3, bright: 0.55 },

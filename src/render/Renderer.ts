@@ -18,8 +18,12 @@ export class Renderer {
 
   constructor(container: HTMLElement, scene: THREE.Scene, camera: THREE.Camera) {
     this.webgl = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    this.webgl.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.25 : 1.5));
+    this.webgl.setPixelRatio(isMobile ? Math.min(window.devicePixelRatio, 1.5) : Math.min(Math.max(window.devicePixelRatio, 1.5), 2));
+    this.maxRatio = this.webgl.getPixelRatio();
     this.webgl.setSize(window.innerWidth, window.innerHeight);
+    // Checking shader errors forces every compile to finish synchronously; only do it while developing
+    // (production then compiles all level shaders in parallel).
+    this.webgl.debug.checkShaderErrors = import.meta.env.DEV;
     this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
     this.webgl.toneMappingExposure = 1.1;
     this.webgl.outputColorSpace = THREE.SRGBColorSpace;
@@ -110,6 +114,49 @@ export class Renderer {
   render(): void {
     this.composer.render();
   }
+
+  /**
+   * Compile every shader the scene needs in the background (parallel where the browser supports it).
+   * The game draws into the bloom chain's off-screen buffer, and three.js builds a different program variant
+   * for that than for the screen (no tone mapping, linear output) — so the compile must target that buffer,
+   * or the first real frame compiles everything a second time, synchronously.
+   */
+  precompile(scene: THREE.Scene, camera: THREE.Camera): Promise<unknown> {
+    const prev = this.webgl.getRenderTarget();
+    this.webgl.setRenderTarget(this.composer.readBuffer);
+    try {
+      return this.webgl.compileAsync(scene, camera); // programs are set up synchronously; the promise only waits
+    } finally {
+      this.webgl.setRenderTarget(prev);
+    }
+  }
+
+  private readonly maxRatio: number;
+  private slowFor = 0;
+  private fastFor = 0;
+  private avgMs = 16;
+
+  /**
+   * Dynamic resolution (call once per frame with the real frame time): when the game stays under ~42 fps the
+   * render resolution steps down (never below 1x), and steps back up when there is clear headroom again.
+   * Steps are rare (resizing the buffers costs a frame), so it settles instead of flapping.
+   */
+  adaptResolution(dtMs: number): void {
+    if (dtMs > 250) return; // tab switch / loading hitch
+    this.avgMs += (dtMs - this.avgMs) * 0.05;
+    const ratio = this.webgl.getPixelRatio();
+    this.slowFor = this.avgMs > 24 ? this.slowFor + dtMs : 0;
+    this.fastFor = this.avgMs < 13 ? this.fastFor + dtMs : 0;
+    let next = ratio;
+    if (this.slowFor > 2000 && ratio > 1) next = Math.max(1, ratio - 0.25);
+    else if (this.fastFor > 6000 && ratio < this.maxRatio) next = Math.min(this.maxRatio, ratio + 0.25);
+    if (next !== ratio) {
+      this.slowFor = this.fastFor = 0;
+      this.avgMs = 17;
+      this.webgl.setPixelRatio(next);
+      this.resize();
+    }
+  }
 }
 
 /**
@@ -139,6 +186,21 @@ export function createEnvironment(
   scene.add(sky);
   const panelPos: [number, number, number][] = [[-20, 5, 0], [20, 5, 0], [0, 20, 0], [0, 8, -30]];
   const panelScale: [number, number, number][] = [[1, 3, 30], [1, 3, 30], [4, 1, 40], [20, 6, 1]];
+  // Studio softbox strips (long, thin, very bright): they draw the sharp highlight lines along the car
+  // panels that make paint look expensive. Slightly tinted towards the level's own light colours.
+  const strip = (x: number, y: number, z: number, sx: number, sy: number, sz: number, color: THREE.Color, k: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(k) }));
+    m.position.set(x, y, z);
+    scene.add(m);
+  };
+  const white = new THREE.Color('#ffffff');
+  const tint = new THREE.Color(env.panels[0] ?? '#ffffff').lerp(white, 0.6);
+  for (const x of [-6, 0, 6]) strip(x, 24, 0, 0.6, 0.2, 46, white, 6);
+  for (const s of [-1, 1]) {
+    strip(s * 26, 9, 0, 0.3, 0.8, 40, tint, 5);
+    strip(s * 26, 4, 0, 0.3, 0.3, 40, white, 3);
+  }
+  strip(0, 6, 30, 30, 0.4, 0.3, tint, 4);
   env.panels.slice(0, 4).forEach((c, i) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(4) }));
     m.position.set(...panelPos[i]);

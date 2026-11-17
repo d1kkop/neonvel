@@ -47,9 +47,9 @@ export const harborDocks: LevelDef = {
     const rng = new Rng(ctx.seed);
     // Quay level inside the loop and along the road; harbour water outside.
     const terrain = new Terrain(track, {
-      cell: 16, margin: 1500,
+      cell: 16, subdiv: ctx.quality === 'low' ? 1 : ctx.quality === 'medium' ? 2 : 3, margin: 1500,
       height: (_x, _z, d, inside) => (inside || d < 45 ? 3 : d < 60 ? 3 - (d - 45) : -12),
-      palette: { low: '#1a1c22', mid: '#3a3c44', high: '#3a3c44', steep: '#2a2a30', midAt: 0, highAt: 50 },
+      palette: { low: '#1a1c22', mid: '#3a3c44', high: '#3a3c44', steep: '#2a2a30', midAt: 0, highAt: 50, ground: 'harbor' },
     });
     scene.add(terrain.mesh);
     scene.add(createOcean({ deep: '#03101e', shallow: '#0a2238', skyHorizon: '#3a2a30', level: 0, night: true }));

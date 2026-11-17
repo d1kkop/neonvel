@@ -12,6 +12,8 @@ export const ATLAS_COLS = 4;
 export const ATLAS_ROWS = 4;
 export const CELL_W = 512;
 export const CELL_H = 256;
+/** Atlas supersampling: designs draw in CELL_W × CELL_H units, stored at this many pixels per unit. */
+export const ATLAS_SCALE = 2;
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -236,9 +238,17 @@ const BASE: Record<string, (ctx: Ctx) => void> = {
 
 export function drawAtlas(designs: BillboardDesign[]): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
-  canvas.width = CELL_W * ATLAS_COLS;
-  canvas.height = CELL_H * ATLAS_ROWS;
+  canvas.width = CELL_W * ATLAS_COLS * ATLAS_SCALE;
+  canvas.height = CELL_H * ATLAS_ROWS * ATLAS_SCALE;
   const ctx = canvas.getContext('2d')!;
+  // Designs draw in CELL units; the canvas stores them ATLAS_SCALE× sharper. Shadow blur ignores the
+  // transform, so scale it here too (keeps every glow the same size as designed).
+  ctx.scale(ATLAS_SCALE, ATLAS_SCALE);
+  const blur = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'shadowBlur')!;
+  Object.defineProperty(ctx, 'shadowBlur', {
+    get() { return blur.get!.call(this) / ATLAS_SCALE; },
+    set(v: number) { blur.set!.call(this, v * ATLAS_SCALE); },
+  });
   designs.slice(0, ATLAS_COLS * ATLAS_ROWS).forEach(({ draw }, i) => {
     const cx = (i % ATLAS_COLS) * CELL_W;
     const cy = Math.floor(i / ATLAS_COLS) * CELL_H;
@@ -262,6 +272,7 @@ export function drawImageIntoCell(canvas: HTMLCanvasElement, img: HTMLImageEleme
   const w = img.width * s;
   const h = img.height * s;
   ctx.save();
+  ctx.setTransform(ATLAS_SCALE, 0, 0, ATLAS_SCALE, 0, 0);
   ctx.beginPath();
   ctx.rect(cx, cy, CELL_W, CELL_H);
   ctx.clip();

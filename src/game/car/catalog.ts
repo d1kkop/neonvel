@@ -1,6 +1,6 @@
 /**
  * The garage line-up. Stats are 0..10 bars shown in the UI and mapped onto the physics spec.
- * Two mediocre free starters; PRO cars ($2) are clearly better; ELITE cars ($3) are the best.
+ * Listed from the slowest to the best (stats only go up down the list); the Night Liner bus is its own class.
  */
 export interface CarModel {
   id: string;
@@ -24,21 +24,22 @@ export interface CarModel {
 }
 
 export const CARS: CarModel[] = [
-  // Free starters: deliberately mediocre.
-  { id: 'vortex', name: 'Vortex GT-R', style: 'wedge', paint: '#c8ff00', accent: '#00e5ff', stats: { speed: 5, accel: 5, grip: 5 }, engine: 'flat12', price: 0, tier: 'free', blurb: 'Your first wedge. Honest, balanced — and outgunned by everything you can unlock.' },
-  { id: 'thunder', name: 'Thunder 454', style: 'muscle', paint: '#1a6bff', accent: '#ff2bd6', stats: { speed: 5, accel: 6, grip: 4 }, engine: 'v8muscle', price: 0, tier: 'free', blurb: 'Old-school muscle. Loud and quick off the line, but wallows in the bends.' },
-  // Free as well (only the last three cars are locked).
-  { id: 'velvet', name: 'Velvet Coupé', style: 'coupe', paint: '#ff2bd6', accent: '#ffb000', stats: { speed: 7, accel: 7, grip: 8 }, engine: 'inline6', price: 0, tier: 'pro', blurb: 'Smooth and sticky — corners like it is on rails.' },
-  { id: 'pocket', name: 'Pocket Rocket', style: 'hatch', paint: '#ffb000', accent: '#3dff9e', stats: { speed: 6, accel: 9, grip: 8 }, engine: 'turbo4', price: 0, tier: 'pro', blurb: 'Turbo hot hatch. Explodes out of every corner.' },
-  { id: 'cruiser', name: 'Midnight Cruiser', style: 'gt', paint: '#2a2a3a', accent: '#a64dff', stats: { speed: 9, accel: 6, grip: 7 }, engine: 'v12', price: 0, tier: 'pro', blurb: 'V12 grand tourer with a huge top speed.' },
-  { id: 'razor', name: 'Razor X', style: 'razor', paint: '#f5f5f5', accent: '#ff3b5c', stats: { speed: 8, accel: 8, grip: 7 }, engine: 'v10', price: 200, tier: 'pro', blurb: 'Knife-edge V10 hypercar wedge. Fast everywhere.' },
-  // The bus: its own class — drive it and everyone else is in a bus too (online as well).
-  { id: 'bus', name: 'Night Liner', style: 'bus', paint: '#e8b020', accent: '#ff2bd6', stats: { speed: 3, accel: 2, grip: 3 }, engine: 'v8muscle', price: 0, tier: 'free', class: 'bus',
+  // Ordered from the slowest to the best: every step down the list is a better car.
+  // Free starters.
+  { id: 'velvet', name: 'Velvet Coupé', style: 'coupe', paint: '#ff2bd6', accent: '#ffb000', stats: { speed: 4, accel: 5, grip: 6 }, engine: 'inline6', price: 0, tier: 'free', blurb: 'Soft 70s Italian GT. Gentle, forgiving, sticks to the line — a calm place to start.' },
+  { id: 'pocket', name: 'Pocket Rocket', style: 'hatch', paint: '#ffb000', accent: '#3dff9e', stats: { speed: 5, accel: 6, grip: 6 }, engine: 'turbo4', price: 0, tier: 'free', blurb: 'Turbo hot hatch. Small, light and eager out of every corner.' },
+  { id: 'vortex', name: 'Vortex GT-R', style: 'wedge', paint: '#c8ff00', accent: '#00e5ff', stats: { speed: 6, accel: 6, grip: 6 }, engine: 'flat12', price: 0, tier: 'free', blurb: 'Pop-up wedge. Honest and balanced, with a real top end.' },
+  // Locked ($0.50).
+  { id: 'thunder', name: 'Thunder 454', style: 'muscle', paint: '#1a6bff', accent: '#ff2bd6', stats: { speed: 7, accel: 7, grip: 6 }, engine: 'v8muscle', price: 50, tier: 'pro', blurb: 'Big-block muscle. Brutal off the line, loud everywhere, a handful in the bends.' },
+  { id: 'cruiser', name: 'Midnight Cruiser', style: 'gt', paint: '#0c0c10', accent: '#a64dff', stats: { speed: 8, accel: 7, grip: 7 }, engine: 'v12', price: 0, tier: 'pro', blurb: 'All-black 80s turbo coupe: square, chrome waterfall grille, huge top speed.' },
+  { id: 'razor', name: 'Razor X', style: 'razor', paint: '#f5f5f5', accent: '#ff3b5c', stats: { speed: 8, accel: 8, grip: 8 }, engine: 'v10', price: 100, tier: 'pro', blurb: 'Knife-edge V10 supercar wedge. Fast everywhere.' },
+  // ELITE ($1.50): the best.
+  { id: 'phantom', name: 'Phantom LM', style: 'proto', paint: '#0b0b12', accent: '#00e5ff', stats: { speed: 9, accel: 9, grip: 9 }, engine: 'racev8', price: 150, tier: 'elite', blurb: 'Le Mans prototype. Iridescent stealth paint, screaming race V8, near-perfect in every corner.' },
+  { id: 'aurum', name: 'Aurum Hyper', style: 'hyper', paint: '#d4a017', accent: '#ff2bd6', stats: { speed: 10, accel: 10, grip: 9 }, engine: 'w16', price: 150, tier: 'elite', blurb: 'W16 quad-turbo in pearlescent gold. The fastest car in the game.' },
+  // The bus ($1.50): its own class — drive it and everyone else is in a bus too (online as well).
+  { id: 'bus', name: 'Night Liner', style: 'bus', paint: '#e8b020', accent: '#ff2bd6', stats: { speed: 3, accel: 2, grip: 3 }, engine: 'diesel6', price: 150, tier: 'elite', class: 'bus',
     specOverride: { topSpeed: 50, accel: 7, brake: 20, grip: 15, wheelbase: 6.2, maxSteer: 0.5 },
-    blurb: '11 metres of 80s city bus. Slow to get going, leans into every bend — and every other racer gets a bus too.' },
-  // ELITE ($3): the best.
-  { id: 'phantom', name: 'Phantom LM', style: 'proto', paint: '#0b0b12', accent: '#00e5ff', stats: { speed: 9, accel: 9, grip: 9 }, engine: 'racev8', price: 300, tier: 'elite', blurb: 'Le Mans prototype. Iridescent stealth paint, screaming race V8, near-perfect in every corner.' },
-  { id: 'aurum', name: 'Aurum Hyper', style: 'hyper', paint: '#d4a017', accent: '#ff2bd6', stats: { speed: 10, accel: 9, grip: 8 }, engine: 'w16', price: 300, tier: 'elite', blurb: 'W16 quad-turbo in pearlescent gold. The fastest car in the game.' },
+    blurb: '11 metres of 80s touring coach. Its own race class: slow to get going, leans into every bend — and every other racer gets a bus too.' },
 ];
 
 /** Physics spec for a vehicle: stats mapped onto the spec, plus its own overrides (bus). */

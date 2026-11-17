@@ -18,14 +18,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STYLES = json.load(open(os.path.join(HERE, 'styles.json')))
 
 
-def smooth_interp(rows, t, n):
-    """rows = [(t, v1..vn)], smoothstep between rows."""
+def smooth_interp(rows, t, n, linear=False):
+    """rows = [(t, v1..vn)], smoothstep (or linear: flat panels) between rows."""
     if t <= rows[0][0]:
         return list(rows[0][1:1 + n])
     for a, b in zip(rows, rows[1:]):
         if t <= b[0]:
             k = (t - a[0]) / (b[0] - a[0])
-            k = k * k * (3 - 2 * k)
+            if not linear:
+                k = k * k * (3 - 2 * k)
             return [a[i] + (b[i] - a[i]) * k for i in range(1, 1 + n)]
     return list(rows[-1][1:1 + n])
 
@@ -68,7 +69,7 @@ class Car:
 
     def sec(self, t):
         """Body section at t: (zb, zt, hw, belt, tumble, crown)."""
-        return smooth_interp(self.d['body'], t, 6)
+        return smooth_interp(self.d['body'], t, 6, self.d.get('linear', True))
 
     def obj(self, name, bm, mats):
         me = bpy.data.meshes.new(name)
@@ -120,20 +121,21 @@ class Car:
         d = self.d
         bm = bmesh.new()
         rings, crease_idx = [], []
-        n_along = d.get('cage_along', 22)
+        n_along = d.get('cage_along', 34)
         t0, t1 = d['body'][0][0], d['body'][-1][0]
-        for i in range(n_along + 1):
-            t = t0 + (t1 - t0) * i / n_along
+        ts = sorted(set([round(t0 + (t1 - t0) * i / n_along, 4) for i in range(n_along + 1)] + [round(r[0], 4) for r in d['body']]))
+        ts = [t for k, t in enumerate(ts) if k == 0 or t - ts[k - 1] > 0.004]
+        for t in ts:
             zb, zt, hw, belt, tumble, crown = self.sec(t)
             hw *= self.HW
             h = zt - zb
-            half = [  # (x, z, creased longitudinally?)
-                (0.0, zb, False), (hw * 0.82, zb, False), (hw, zb + 0.13 * h, True), (hw * d.get('shoulder', 1.0), zb + belt * h, True),
-                (hw * tumble, zt, True), (hw * tumble * 0.55, zt + crown * 0.6, False), (0.0, zt + crown, False)]
+            half = [  # (x, z, crease weight along the car)
+                (0.0, zb, 0), (hw * 0.84, zb, d.get('under_crease', 0.8)), (hw, zb + 0.13 * h, 1), (hw * d.get('shoulder', 1.0), zb + belt * h, 1),
+                (hw * tumble, zt, 1), (hw * tumble * 0.55, zt + crown * 0.85, 0), (0.0, zt + crown, 0)]
             pts = [(-x, z, c) for x, z, c in reversed(half[1:-1])] + half
             ring = [bm.verts.new((x, self.y(t), z)) for x, z, _ in pts]
             rings.append(ring)
-            crease_idx = [j for j, p in enumerate(pts) if p[2]]
+            crease_idx = [(j, p[2]) for j, p in enumerate(pts) if p[2]]
         n = len(rings[0])
         faces = []
         for a, b in zip(rings, rings[1:]):
@@ -148,15 +150,16 @@ class Car:
         # Creases: character lines along the body + the front / rear face outlines.
         cl = bm.edges.layers.float.get('crease_edge') or bm.edges.layers.float.new('crease_edge')
         for a, b in zip(rings, rings[1:]):
-            for j in crease_idx:
+            for j, w in crease_idx:
                 e = bm.edges.get((a[j], b[j]))
                 if e:
-                    e[cl] = d.get('crease', 0.92)
-        for ring in (rings[0], rings[-1]):
+                    e[cl] = d.get('crease', 1.0) * (1.0 if w == 1 else w)
+        # Crisp front and rear faces: the outline loops and the loops right behind them.
+        for ring, w in ((rings[0], 1.0), (rings[-1], 1.0), (rings[1], 0.6), (rings[-2], 0.6)):
             for j in range(n):
                 e = bm.edges.get((ring[j], ring[(j + 1) % n]))
                 if e:
-                    e[cl] = d.get('end_crease', 0.75)
+                    e[cl] = d.get('end_crease', 1.0) * w
         o = self.obj('body', bm, ['paint', 'well'])
         sub = o.modifiers.new('sub', 'SUBSURF'); sub.levels = sub.render_levels = d.get('subdiv', 2)
         self.apply_all(o)
@@ -332,6 +335,12 @@ class Car:
         zb, zt, hw, y = self.front_face()
         h = zt - zb
         zc = zb + z * h
+        if kind == 'waterfall':  # tall chrome frame with fine vertical bars
+            self.box((hw * 2 * width + 0.06, 0.04, h * height + 0.06), (0, y + 0.005, zc), 'chrome', bevel=0.01)
+            self.box((hw * 2 * width, 0.05, h * height), (0, y + 0.02, zc), 'trim')
+            for i in range(13):
+                self.box((0.016, 0.06, h * height * 0.96), (-hw * width + (i + 0.5) * hw * 2 * width / 13, y + 0.03, zc), 'chrome')
+            return
         if kind == 'eggcrate':  # chrome surround + grid
             self.box((hw * 2 * width + 0.06, 0.04, h * height + 0.06), (0, y + 0.005, zc), 'chrome', bevel=0.01)
             self.box((hw * 2 * width, 0.05, h * height), (0, y + 0.02, zc), 'trim')
@@ -340,6 +349,7 @@ class Car:
             self.box((hw * 2 * width, 0.06, 0.02), (0, y + 0.03, zc), 'chrome')
         else:
             self.box((hw * 2 * width, 0.04, h * height), (0, y + 0.01, zc), 'trim')
+            self.mesh_insert((0, y + 0.034, zc), (1, 0, 0), (0, 0, 1), hw * 2 * width * 0.97, h * height * 0.9)
             for i in range(3):
                 self.box((hw * 2 * width, 0.06, 0.012), (0, y + 0.02, zc - h * height * 0.3 + i * h * height * 0.3), 'trim')
 
@@ -409,9 +419,13 @@ class Car:
     def side_intake(self, t, z=0.5, size=(0.4, 0.55, 0.26)):
         zb, zt, hw, *_ = self.sec(t)
         for s in (-1, 1):
-            c = self.box(size, (s * hw * self.HW, self.y(t), zb + z * (zt - zb)), 'well', bevel=0.05)
+            zc = zb + z * (zt - zb)
+            h0 = self.hit((s * 3.0, self.y(t), zc), (-s, 0, 0))
+            c = self.box(size, (s * hw * self.HW, self.y(t), zc), 'well', bevel=0.05)
             self.apply_all(c)
             self.boolean(self.body_obj, c)
+            if h0:
+                self.mesh_insert((h0[0].x - s * 0.03, self.y(t), zc), (0, 1, 0), (0, 0, 1), size[1] * 0.82, size[2] * 0.78)
 
     def scoop(self, t, w=0.6, l=0.8, h=0.12):
         zb, zt, hw, belt, tumble, crown = self.sec(t)
@@ -467,8 +481,126 @@ class Car:
             for s in (-1, 1):
                 self.box((k + 0.05, (R + 0.15) * 2.3, 0.14), (s * (self.HW + k * 0.4), self.y(t), R + R * 0.95), 'paint', bevel=0.05)
 
+    # ---------------------------------------------------------------- panel gaps + mesh inserts
+    def hit(self, origin, direction):
+        ok, loc, nrm, _ = self.body_obj.ray_cast(Vector(origin), Vector(direction).normalized(), distance=10.0)
+        return (loc, nrm) if ok else None
+
+    def groove(self, rays, gap=None, depth=0.014):
+        """Cut a shut line into the finished body along the surface points the rays hit (one solid sweep)."""
+        gap = (gap or self.d.get('gap', 0.011)) / 2
+        hits = [h for h in (self.hit(o, dr) for o, dr in rays) if h]
+        if len(hits) < 2:
+            return
+        bm = bmesh.new()
+        rings = []
+        n = len(hits)
+        for i, (loc, nrm) in enumerate(hits):
+            T = (hits[min(i + 1, n - 1)][0] - hits[max(i - 1, 0)][0]).normalized()
+            if i == 0: loc = loc - T * gap
+            if i == n - 1: loc = loc + T * gap
+            B = nrm.cross(T).normalized()
+            o, inn = loc + nrm * 0.03, loc - nrm * depth
+            rings.append([bm.verts.new(v) for v in (o + B * gap, o - B * gap, inn - B * gap, inn + B * gap)])
+        for a, b in zip(rings, rings[1:]):
+            for j in range(4):
+                bm.faces.new((a[j], a[(j + 1) % 4], b[(j + 1) % 4], b[j]))
+        bm.faces.new(list(reversed(rings[0])))
+        bm.faces.new(rings[-1])
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        c = self.obj('gap', bm, ['well'])
+        # A degenerate sweep can make the exact boolean eat the body: keep a copy and roll back if it shrinks.
+        body = self.body_obj
+        before = body.data.copy()
+        n0 = len(body.data.polygons)
+        self.boolean(body, c)
+        if len(body.data.polygons) < n0 * 0.97:
+            bad = body.data
+            print('GROOVE ROLLED BACK', n0, '->', len(bad.polygons))
+            body.data = before
+            bpy.data.meshes.remove(bad)
+        else:
+            bpy.data.meshes.remove(before)
+
+    def _top_rays(self, t, x0, x1, n=24):
+        y = self.y(t)
+        return [((x0 + (x1 - x0) * i / (n - 1), y, 4.0), (0, 0, -1)) for i in range(n)]
+
+    def _long_top_rays(self, x, t0, t1, n=24):
+        return [((x, self.y(t0 + (t1 - t0) * i / (n - 1)), 4.0), (0, 0, -1)) for i in range(n)]
+
+    def _side_rays(self, s, t, z0, z1, n=14):
+        return [((s * 3.0, self.y(t), z0 + (z1 - z0) * i / (n - 1)), (-s, 0, 0)) for i in range(n)]
+
+    def _sill_rays(self, s, z, t0, t1, n=20):
+        return [((s * 3.0, self.y(t0 + (t1 - t0) * i / (n - 1)), z), (-s, 0, 0)) for i in range(n)]
+
+    def panel_gaps(self):
+        """Door shuts, door bottom, bonnet and boot lid outlines as real grooves (dark shut lines with depth)."""
+        d = self.d
+        if d.get('gaps') is False:
+            return
+        g0, g1 = d['glass'][0][0], d['glass'][-1][0]
+        R0, R1 = self.wheelR
+        tf = max(self.wheelT[0] + (R0 + 0.12) / self.L, g0 + 0.015)
+        tr = min(tf + d.get('door_len', 1.12) / self.L, self.wheelT[1] - (R1 + 0.14) / self.L)
+        if d.get('doors'):
+            tf, tr = d['doors']
+        for s in (-1, 1):
+            for t in (tf, tr):
+                zb, zt, *_ = self.sec(t)
+                zg = smooth_interp(d['glass'], min(max(t, g0), g1), 4)[0]
+                self.groove(self._side_rays(s, t, zb + 0.07, min(zt, zg) - 0.025))
+            zb, zt, *_ = self.sec((tf + tr) / 2)
+            self.groove(self._sill_rays(s, zb + 0.09 * (zt - zb) + 0.05, tf, tr))
+        # Bonnet: rectangle from the nose to the scuttle.
+        tb = g0 - 0.018
+        tn = d.get('bonnet_front', 0.045)
+        if tb - tn > 0.08:
+            zb, zt, hw, belt, tumble, crown = self.sec(tb)
+            xe = hw * self.HW * tumble * d.get('bonnet_w', 0.86)
+            self.groove(self._top_rays(tb, -xe, xe))
+            self.groove(self._top_rays(tn, -xe, xe))
+            for s in (-1, 1):
+                self.groove(self._long_top_rays(s * xe, tn, tb))
+        # Boot lid (only where the glass stops before the tail).
+        tk = g1 + 0.018
+        if 0.97 - tk > 0.07 and not d.get('no_boot'):
+            zb, zt, hw, belt, tumble, crown = self.sec(tk)
+            xe = hw * self.HW * tumble * d.get('boot_w', 0.84)
+            self.groove(self._top_rays(tk, -xe, xe))
+            for s in (-1, 1):
+                self.groove(self._long_top_rays(s * xe, tk, 0.985))
+        bpy.context.view_layer.objects.active = self.body_obj
+        self.body_obj.select_set(True)
+        try:
+            bpy.ops.object.shade_smooth_by_angle(angle=math.radians(d.get('smooth_angle', 50)))
+        except Exception:
+            pass
+        self.body_obj.select_set(False)
+
+    def mesh_insert(self, center, u, v, size_u, size_v, mat='carbon', pitch=0.032, bar=0.007):
+        """A woven grid of thin bars in the plane spanned by unit vectors u, v (for intakes and grilles)."""
+        center, u, v = Vector(center), Vector(u), Vector(v)
+        nrm = u.cross(v).normalized()
+        bm = bmesh.new()
+        def bar_box(c, along, length):
+            other = v if along is u else u
+            ext = (along * length / 2, other * bar / 2, nrm * bar / 2)
+            vs = [bm.verts.new(c + sa * ext[0] + sb * ext[1] + sc * ext[2]) for sa in (-1, 1) for sb in (-1, 1) for sc in (-1, 1)]
+            for f in ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)):
+                bm.faces.new([vs[i] for i in f])
+        nu, nv = max(2, int(size_u / pitch)), max(2, int(size_v / pitch))
+        for i in range(nu + 1):
+            bar_box(center + u * (-size_u / 2 + i * size_u / nu) + nrm * 0.003, v, size_v)
+        for j in range(nv + 1):
+            bar_box(center + v * (-size_v / 2 + j * size_v / nv), u, size_u)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        return self.obj('mesh', bm, [mat])
+
     # ---------------------------------------------------------------- export + preview
     def finish(self):
+        self.panel_gaps()
         for o in bpy.context.scene.objects:
             if o.type == 'MESH' and o.modifiers:
                 self.apply_all(o)

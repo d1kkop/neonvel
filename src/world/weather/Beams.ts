@@ -183,6 +183,8 @@ export function createHeadlightBeams(width: number, length: number, frontZ: numb
     h.scale.setScalar(0.62);
     g.add(h);
   }
+  // Layer 2: only the main camera draws the beams (not the road reflection or the rear-view mirror).
+  g.traverse((o) => o.layers.set(2));
   return g;
 }
 

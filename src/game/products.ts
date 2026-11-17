@@ -5,12 +5,13 @@
 export const LEVEL_PRICES: Record<string, number> = {
   'neon-skyway': 0,
   'palm-coast': 0,
-  'desert-mirage': 200,
-  'harbor-docks': 200,
-  'snow-pass': 200,
-  'cyber-grid': 200,
-  'orbit-run': 200,
-  'deep-blue': 300,
+  'desert-mirage': 0,
+  'harbor-docks': 0,
+  'cyber-grid': 0,
+  // Locked: the three special worlds.
+  'snow-pass': 100,
+  'orbit-run': 100,
+  'deep-blue': 150,
 };
 
 export const LEVEL_NAMES: Record<string, string> = {

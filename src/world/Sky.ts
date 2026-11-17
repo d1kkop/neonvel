@@ -20,6 +20,7 @@ export class Sky {
     uAurora: { value: 0 },
     uNebula: { value: 0 },
     uGridHorizon: { value: 0 },
+    uCloudTint: { value: 0 },
   };
 
   constructor() {
@@ -40,7 +41,7 @@ export class Sky {
         uniform vec3 uMistColor;
         uniform float uMist;
         uniform vec3 uTop, uMid, uHorizon, uFogColor, uHazeColor, uSunColorA, uSunColorB, uMoonDir;
-        uniform float uSunSize, uSunIntensity, uTime, uClouds, uFlash, uStars, uSunStripes, uDayClouds, uAurora, uNebula, uGridHorizon;
+        uniform float uSunSize, uSunIntensity, uTime, uClouds, uFlash, uStars, uSunStripes, uDayClouds, uAurora, uNebula, uGridHorizon, uCloudTint;
         varying vec3 vWorld;
         ${NOISE_GLSL}
         void main() {
@@ -120,6 +121,14 @@ export class Sky {
             float dn = fbm(duv * 0.9 + vec2(uTime * 0.008, 0.0)) * 0.7 + fbm(duv * 2.7) * 0.4;
             float dc = smoothstep(0.62, 0.9, dn) * smoothstep(0.0, 0.08, y) * uDayClouds;
             vec3 dcol = mix(vec3(1.0, 0.92, 0.85), vec3(1.0), smoothstep(0.7, 1.0, dn)) * 1.1;
+            if (uCloudTint > 0.0) {
+              // Sunset clouds: lit orange-pink from below near the sun, violet-grey on the far side and higher up.
+              float toSun = max(dot(normalize(dir.xz), normalize(uMoonDir.xz)), 0.0);
+              vec3 lit = mix(uHorizon * 1.15, uSunColorA * 1.3, toSun * toSun);
+              vec3 shade = mix(uMid * 0.9, uTop * 1.6, smoothstep(0.05, 0.4, y));
+              vec3 sc = mix(shade, lit, (1.0 - smoothstep(0.0, 0.35, y)) * (0.45 + 0.55 * toSun) * smoothstep(0.55, 0.85, dn));
+              dcol = mix(dcol, sc, uCloudTint);
+            }
             col = mix(col, dcol, dc);
           }
 
@@ -146,7 +155,7 @@ export class Sky {
   }
 
   /** Apply a level's sky parameters. */
-  configure(p: { top: string; mid: string; horizon: string; sunA: string; sunB: string; sunSize: number; sunIntensity: number; sunStripes: number; stars: number; dayClouds: number; aurora?: number; nebula?: number; gridHorizon?: number }): void {
+  configure(p: { top: string; mid: string; horizon: string; sunA: string; sunB: string; sunSize: number; sunIntensity: number; sunStripes: number; stars: number; dayClouds: number; aurora?: number; nebula?: number; gridHorizon?: number; cloudTint?: number }): void {
     const u = this.uniforms;
     u.uTop.value.set(p.top);
     u.uMid.value.set(p.mid);
@@ -157,6 +166,7 @@ export class Sky {
     u.uSunIntensity.value = p.sunIntensity;
     u.uSunStripes.value = p.sunStripes;
     u.uStars.value = p.stars;
+    u.uCloudTint.value = p.cloudTint ?? 0;
     u.uDayClouds.value = p.dayClouds;
     u.uAurora.value = p.aurora ?? 0;
     u.uNebula.value = p.nebula ?? 0;

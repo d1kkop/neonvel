@@ -131,12 +131,6 @@ export class Minimap {
         g.stroke();
       } else g.fill();
       g.shadowBlur = 0;
-      if (clamped && !c.noLabel) {
-        // Gap label, nudged inward from the rim.
-        const lx = R + (dx / d) * (rim - S * 0.11), ly = R + (dy / d) * (rim - S * 0.11);
-        g.fillStyle = 'rgba(255, 255, 255, 0.9)';
-        g.fillText(`${c.gap > 0 ? '+' : '−'}${Math.round(Math.abs(c.gap))}m`, lx, ly);
-      }
     }
     g.restore();
     // Rim.

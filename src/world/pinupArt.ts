@@ -171,9 +171,12 @@ export function drawFigure(ctx: Ctx, x: number, feetY: number, height: number, s
   const H = Math.ceil(height * 1.05);
   // Render the figure into its own layer so we can add a rim glow around the whole silhouette.
   const layer = document.createElement('canvas');
-  layer.width = W;
-  layer.height = H;
+  // Layer at the target canvas's real resolution (the atlas is drawn scaled up).
+  const ss = Math.max(1, Math.hypot(ctx.getTransform().a, ctx.getTransform().b));
+  layer.width = Math.ceil(W * ss);
+  layer.height = Math.ceil(H * ss);
   const c = layer.getContext('2d')!;
+  c.scale(ss, ss);
   c.translate(W / 2, H - height * 0.99);
   c.scale(style.flip ? -height : height, height);
 
@@ -344,10 +347,10 @@ export function drawFigure(ctx: Ctx, x: number, feetY: number, height: number, s
   ctx.save();
   ctx.shadowColor = style.rim;
   ctx.shadowBlur = silhouette ? 18 : 10;
-  ctx.drawImage(layer, x - W / 2, feetY - H);
+  ctx.drawImage(layer, x - W / 2, feetY - H, W, H);
   if (silhouette) {
     ctx.shadowBlur = 6;
-    ctx.drawImage(layer, x - W / 2, feetY - H);
+    ctx.drawImage(layer, x - W / 2, feetY - H, W, H);
   }
   ctx.restore();
 }

@@ -19,6 +19,8 @@ export interface SkyParams {
   stars: number;
   /** White puffy daytime clouds amount (independent from storm clouds). */
   dayClouds: number;
+  /** 0..1: tint the daytime clouds with the horizon / sun colours (sunsets). */
+  cloudTint?: number;
   aurora?: number;
   nebula?: number;
   gridHorizon?: number;

@@ -72,8 +72,8 @@ function tunnelPanelMaterial(): THREE.ShaderMaterial {
 
 export class Structures {
   readonly group = new THREE.Group();
-  private readonly metal = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#1c1a26', roughness: 0.45, metalness: 0.7 }));
-  private readonly concrete = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#24222f', roughness: 0.8, metalness: 0.15 }));
+  private readonly metal = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#1c1a26', roughness: 0.45, metalness: 0.7 }), 'metal');
+  private readonly concrete = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#24222f', roughness: 0.8, metalness: 0.15 }), 'concrete');
   private readonly neonBatch = new BoxBatch();
   private readonly metalBatch = new BoxBatch();
   private readonly concreteBatch = new BoxBatch();
@@ -108,7 +108,7 @@ export class Structures {
     const dd = ROAD_STYLE.deckDepth;
     const H = 7.5;
     const outer = hw + t + 0.6;
-    const range = { d0: s.start, d1: s.end, step: 3 };
+    const range = { d0: s.start, d1: s.end, step: 1.5 };
 
     // Interior shell (chamfered box).
     this.group.add(
@@ -183,7 +183,7 @@ export class Structures {
     }
 
     // Longitudinal beams forming the roof grid.
-    const range = { d0: s.start, d1: s.end, step: 4, closedProfile: true };
+    const range = { d0: s.start, d1: s.end, step: 1.5, closedProfile: true };
     const beams: THREE.BufferGeometry[] = [];
     for (let lat = -hw; lat <= hw + 0.01; lat += 3) beams.push(extrude(track, rectProfile(lat, H + 0.1, 0.22, 0.3), range));
     this.group.add(new THREE.Mesh(mergeGeometries(beams), this.metal));
@@ -200,7 +200,7 @@ export class Structures {
         color: '#1a2a55', metalness: 0.9, roughness: 0.1, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide,
       }),
     );
-    this.group.add(new THREE.Mesh(extrude(track, [[-postLat, H + 0.28], [postLat, H + 0.28]], { d0: s.start, d1: s.end, step: 4 }), glass));
+    this.group.add(new THREE.Mesh(extrude(track, [[-postLat, H + 0.28], [postLat, H + 0.28]], { d0: s.start, d1: s.end, step: 1.5 }), glass));
     // Neon trim along the canopy edges.
     this.group.add(new THREE.Mesh(extrude(track, rectProfile(-postLat, H + 0.4, 0.15, 0.15), range), neonStripMaterial(CYAN, 3)));
     this.group.add(new THREE.Mesh(extrude(track, rectProfile(postLat, H + 0.4, 0.15, 0.15), range), neonStripMaterial(MAGENTA, 3)));

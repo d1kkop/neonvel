@@ -54,14 +54,14 @@ export const deepBlue: LevelDef = {
     const { track, scene } = ctx;
     const rng = new Rng(ctx.seed);
     const seabed = new Terrain(track, {
-      cell: ctx.quality === 'low' ? 20 : 14,
+      cell: ctx.quality === 'low' ? 20 : 14, subdiv: ctx.quality === 'low' ? 1 : ctx.quality === 'medium' ? 2 : 3,
       margin: 900,
       height: (x, z, d) => {
         const dunes = fbm2(x * 0.008, z * 0.008, 4) * 14;
         const canyon = THREE.MathUtils.smoothstep(d, 200, 600) * fbm2(x * 0.003, z * 0.003, 3, 9) * 90;
         return -2 + dunes + canyon;
       },
-      palette: { low: '#c8b890', mid: '#a89870', high: '#5a6a5a', steep: '#4a4a44', midAt: 10, highAt: 50 },
+      palette: { low: '#c8b890', mid: '#a89870', high: '#5a6a5a', steep: '#4a4a44', midAt: 10, highAt: 50, ground: 'seabed' },
     });
     scene.add(seabed.mesh);
     scene.add(createWaterSurface(SURFACE, '#2ab8d0'));

@@ -1,17 +1,38 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from carlib2 import Car
+from carlib3 import Car3
 
-# Razor X (locked) — extreme 80s wedge: knife nose, NACA ducts, louvred engine cover, giant wing, quad exhaust, neon sills.
-c = Car('razor', dict(
-    preview_color=(0.96, 0.96, 0.96), arches='square', crease=1.0, end_crease=1.0, subdiv=1, smooth_angle=28,
-    body=[(0.00, 0.20, 0.36, 0.82, 0.50, 0.86, 0.0), (0.06, 0.17, 0.46, 0.96, 0.55, 0.86, 0.01), (0.35, 0.16, 0.62, 1.0, 0.60, 0.84, 0.02),
-          (0.62, 0.16, 0.76, 1.04, 0.64, 0.82, 0.02), (0.90, 0.17, 0.82, 1.05, 0.66, 0.82, 0.01), (1.00, 0.26, 0.80, 1.0, 0.66, 0.84, 0.0)],
-    glass=[(0.30, 0.62, 0.64, 0.74, 0.70), (0.40, 0.64, 0.98, 0.70, 0.56), (0.58, 0.70, 1.02, 0.64, 0.52), (0.70, 0.76, 0.86, 0.58, 0.50), (0.76, 0.78, 0.80, 0.50, 0.46)],
-    pillars=[]))
+# Razor X — v3 razor-edged 80s supercar: knife wedge nose with closed pop-ups, crisp creases everywhere, a low
+# cab-forward glasshouse, deep finned scoops behind the doors, louvred engine deck and a high wing.
+c = Car3('razor', dict(
+    preview_color=(0.9, 0.9, 0.95), rim='mesh',
+    keys=[
+        dict(t=0.00, zb=0.20, hw=0.86, zw=0.32, scoop=0.0, sh=0.92, zsh=0.42, fx=0.86, zf=0.46, vx=0.60, zv=0.45, gb=0.40, zg=0.45, rw=0.20, zr=0.455, crown=0.003),
+        dict(t=0.06, zb=0.14, hw=0.97, zw=0.36, zsh=0.55, fx=0.90, zf=0.60, vx=0.66, zv=0.58, gb=0.42, zg=0.575, zr=0.58, crown=0.006),
+        dict(t=0.19, hw=1.0, zw=0.40, zsh=0.70, fx=0.92, zf=0.82, vx=0.70, zv=0.74, gb=0.44, zg=0.72, zr=0.725, crown=0.008),
+        dict(t=0.28, zsh=0.74, zf=0.84, vx=0.74, zv=0.79, gb=0.50, zg=0.78, rw=0.30, zr=0.79, crown=0.01),
+        dict(t=0.30, gb=0.70, zg=0.81, rw=0.52, zr=0.82),
+        dict(t=0.45, hw=0.97, zf=0.85, gb=0.72, zg=0.84, rw=0.52, zr=1.08, crown=0.02),
+        dict(t=0.58, scoop=0.6, zr=1.07),
+        dict(t=0.66, scoop=1.0, gb=0.64, zg=0.88, rw=0.46, zr=1.02),
+        dict(t=0.80, scoop=0.3, hw=1.04, zw=0.44, zsh=0.82, zf=0.94, vx=0.70, zv=0.90, gb=0.50, zg=0.90, rw=0.30, zr=0.91, crown=0.01),
+        dict(t=0.96, scoop=0.0, zb=0.18, hw=1.02, zf=0.93, zv=0.90, zg=0.90, zr=0.905),
+        dict(t=1.00, zb=0.26, hw=0.97, zw=0.48, zsh=0.84, zf=0.90, vx=0.74, zv=0.88, gb=0.50, zg=0.88, rw=0.30, zr=0.885, crown=0.006),
+    ],
+    cabin=dict(ws=(0.305, 0.45), side=(0.452, 0.64), rear=(0.665, 0.71)),
+    doors=(0.31, 0.58), bonnet=(0.17, 0.28), bonnet_w=0.55,
+    cage_along=38, crease_sill=1.0, crease_shoulder=1.0, crease_fender=1.0, crease_belt=1.0, end_crease=0.95,
+    nose_kx=0.88, nose_kz=0.8, nose_dt=0.008, tail_kx=0.94, tail_kz=0.92, tail_dt=0.006, smooth_angle=30,
+))
 c.body()
-c.naca(0.5, 0.58)
-c.greenhouse()
-c.headlights('popup'); c.taillights('quad', 0.58); c.bumpers('carbon'); c.splitter(); c.diffuser(); c.skirts()
-c.louvres(0.78, 0.94, 8, on='body'); c.wing('big', 0.94, 0.34, 0.98, 0.46); c.exhausts(4, r=0.05); c.neon_sill(); c.mirrors(0.36); c.plate()
+c.retro_lamps('popup', x=0.45, z=0.32, w=0.3)
+c.front_intakes(z=0.24)
+c.side_scoops(t=0.64, z=0.6, size=(0.42, 0.5, 0.26), fins=4)
+c.engine_louvres(0.72, 0.92, n=9, w=0.8)
+c.retro_tails('bar', z=0.74, h=0.1)
+c.exhausts3(2, x=0.34, r=0.045, z=0.3, dual=True)
+c.big_wing(t=0.95, height=0.22)
+c.splitter3()
+c.sills3(0.32, 0.58)
+c.mirrors3(0.33)
 c.finish()

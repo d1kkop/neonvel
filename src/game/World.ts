@@ -118,6 +118,8 @@ export class World {
   private groundMist!: GroundMist;
   /** 0..1, set by the app every frame from the music's beat clock. */
   beatPulse = 0;
+  /** 0..1 flash on the music's harder kicks (accents, drops), decaying. */
+  beatHit = 0;
   private boostFx!: BoostFX;
   private readonly frame = makeFrame();
   private readonly basis = new THREE.Matrix4();
@@ -172,7 +174,7 @@ export class World {
       sections: L.track.sections,
       hills: L.track.hills,
     });
-    const reflectionScale = quality === 'low' ? 0.3 : quality === 'medium' ? 0.4 : 0.5;
+    const reflectionScale = quality === 'low' ? 0.3 : quality === 'medium' ? 0.5 : 0.8;
     this.road = new Road(this.track, { reflectionScale, style: L.road, pillars: L.track.pillars });
     this.scene.add(this.road.group);
     this.scene.add(new Structures(this.track, { concrete: L.road.concrete, metal: L.road.railColor ?? '#1c1a26', neonA: L.road.leftNeon, neonB: L.road.rightNeon, solidWalls: ['concrete', 'snowbank'].includes(L.road.wallStyle ?? 'concrete') }).group);
@@ -477,6 +479,8 @@ export class World {
       c.car.wheels.forEach((w, i) => {
         w.rotation.x = spin;
         w.rotation.y = i < 2 ? wheelYaw : 0;
+        const cal = w.userData.caliper as THREE.Object3D | undefined;
+        if (cal) cal.rotation.x = -spin; // calipers don't spin
       });
     }
   }
@@ -499,7 +503,8 @@ export class World {
     const mist = this.weather.mist;
     this.groundMist.update(mist, this.cars[0]?.phys.s ?? 0);
     const bloom = this.level.lighting.bloom;
-    this.renderer.bloom.strength = bloom.strength * (1 + mist * 1.1) * (1 + 0.18 * this.beatPulse);
+    atmosphere.uBeatHit.value = this.beatHit;
+    this.renderer.bloom.strength = bloom.strength * (1 + mist * 1.1) * (1 + 0.18 * this.beatPulse + 0.3 * this.beatHit);
     this.road.setBeatPulse(this.beatPulse);
     this.renderer.bloom.radius = Math.min(1, bloom.radius + mist * 0.45);
     setCarFogGlow(mist * (this.level.time === 'day' ? 0.35 : 1));
@@ -520,9 +525,10 @@ export class World {
       if (m.geometry) m.geometry.dispose();
       const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
       for (const mat of mats) {
-        for (const v of Object.values(mat)) if (v instanceof THREE.Texture) v.dispose();
+        // Shared, cached textures (billboard atlases) are marked persistent and kept.
+        for (const v of Object.values(mat)) if (v instanceof THREE.Texture && !v.userData.persistent) v.dispose();
         const u = (mat as THREE.ShaderMaterial).uniforms;
-        if (u) for (const x of Object.values(u)) if (x && x.value instanceof THREE.Texture) x.value.dispose();
+        if (u) for (const x of Object.values(u)) if (x && x.value instanceof THREE.Texture && !x.value.userData.persistent) x.value.dispose();
         mat.dispose();
       }
     });

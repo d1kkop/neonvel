@@ -117,6 +117,9 @@ export class App {
       }),
     });
     this.hud = new Hud(this.menu.root);
+    this.camera.layers.enable(1);
+    this.camera.layers.enable(2);
+    this.mirror.camera.layers.enable(1);
     this.mirrorFrame = document.createElement('div');
     this.mirrorFrame.className = 'mirror-frame';
     this.hud.el.appendChild(this.mirrorFrame);
@@ -198,11 +201,14 @@ export class App {
     w.onLevelSound = (kind) => { if (kind === 'dolphin') this.audio.ambience?.dolphin(); };
     this.renderer.setScene(w.scene, this.camera);
     this.world = w;
-    // The chase camera sits further back / higher for long vehicles (the bus).
+    // The chase camera sits further back / higher for long vehicles (the 3 m tall bus: well above the roof).
     const len = w.player.car.style.length;
     const k = Math.max(1, len / 4.6);
-    this.chase.distance = 7.5 * Math.pow(k, 0.75);
-    this.chase.height = 2.4 * Math.pow(k, 0.6);
+    this.vehScale = k;
+    this.chase.distance = 7.5 * Math.pow(k, 0.95);
+    this.chase.height = 2.4 * Math.pow(k, 1.1);
+    this.chase.lookAhead = 10 * Math.pow(k, 0.6);
+    this.chase.lookHeight = 0.8 * Math.pow(k, 0.9);
     const pm = carById(this.isOwned(this.settings.carId) ? this.settings.carId : 'vortex');
     this.audio.setEngineProfile(ENGINES[pm.engine] ?? ENGINES.flat12);
     this.applyAmbience();
@@ -248,7 +254,7 @@ export class App {
       col = '#ff2bd6';
       group.traverse((o) => {
         const m = (o as THREE.Mesh).material as THREE.MeshPhysicalMaterial | undefined;
-        if (m && (m as THREE.Material).vertexColors && m.color) col = '#' + m.color.getHexString();
+        if (m && (m as THREE.Material).vertexColors && m.color && (m as THREE.Material).name !== 'wheel') col = '#' + m.color.getHexString();
       });
       this.carColors.set(group, col);
     }
@@ -313,11 +319,15 @@ export class App {
       // Compile all shaders up front (parallel where supported) so the race starts without hitches.
       w.placeCars(0);
       this.chase.update(w.player.car.group, 0, 1 / 60);
+      // Nothing may draw the new world until this is done: a single normal frame would compile every shader
+      // synchronously, one by one, and freeze the page for seconds (the loading screen covers the canvas).
+      this.compiling = true;
       try {
-        await this.renderer.webgl.compileAsync(w.scene, this.camera);
+        await this.renderer.precompile(w.scene, this.camera);
       } catch {
         /* compile lazily */
       }
+      this.compiling = false;
       if (this.world !== w) return;
       this.laps = modeId === 'race' ? this.settings.laps : Infinity;
       this.history.length = 0;
@@ -526,7 +536,7 @@ export class App {
   private tryRewind(): void {
     // Never online: the other players' cars can't be rewound (and it would be a cheat in ranked races).
     if (this.online && this.state === 'racing') { this.hud.vcrText('NO REWIND ONLINE', 1.2); return; }
-    if (this.settings.vhs === false || this.state !== 'racing' || this.online || this.mode || this.paused || this.rewind) return;
+    if (this.settings.vhs !== true || this.state !== 'racing' || this.online || this.mode || this.paused || this.rewind) return;
     if (this.rewindsLeft <= 0) { this.hud.vcrText('NO TAPE LEFT', 1.2); return; }
     if (this.history.length < 30) return;
     this.rewindsLeft--;
@@ -584,7 +594,7 @@ export class App {
 
   private render(alpha: number, dt: number): void {
     const w = this.world;
-    if (!w) return;
+    if (!w || this.compiling) return;
     w.placeCars(this.paused ? 1 : alpha);
     const p = w.player;
 
@@ -611,11 +621,12 @@ export class App {
     // The world and the HUD pulse to the music's beat.
     const bd = this.beatDistance();
     w.beatPulse = bd && !this.paused ? bd.pulse : 0;
+    w.beatHit = this.paused ? 0 : this.hardHit(dt, bd);
     this.hud.setBeat(bd?.pulse ?? 0, !!bd && bd.dist <= App.BEAT_WINDOW);
     w.update(this.paused ? 0 : dt, this.camera, covered);
     this.vhsTime += dt;
     this.rewindFx += ((this.rewind ? 1 : 0) - this.rewindFx) * Math.min(1, dt * 10);
-    this.renderer.setVhs(this.settings.vhs !== false ? 1 : 0, this.rewindFx, this.vhsTime);
+    this.renderer.setVhs(this.settings.vhs === true ? 1 : 0, this.rewindFx, this.vhsTime);
 
     if (this.state === 'racing' || this.state === 'finished' || this.state === 'countdown') {
       const L = w.track.length;
@@ -648,9 +659,18 @@ export class App {
     }
     this.renderer.render();
     if (this.state === 'racing' || this.state === 'countdown' || this.state === 'finished') this.renderMirror(w);
+    // Dynamic resolution, from the real time between frames (only while racing: menus and loading don't count).
+    const nowMs = performance.now();
+    if (this.state === 'racing' && !this.paused && this.lastFrameMs) this.renderer.adaptResolution(nowMs - this.lastFrameMs);
+    this.lastFrameMs = nowMs;
   }
 
   private coverBlend = 0;
+  private lastFrameMs = 0;
+  /** True while a freshly built world's shaders compile in the background (see startRace). */
+  private compiling = false;
+  /** Vehicle size relative to a car (bus ≈ 2.4): scales the camera shots. */
+  private vehScale = 1;
 
   /** Cinematic menu camera: cycles through a few shots around the leading car. */
   private attractCamera(w: World, dt: number): void {
@@ -679,19 +699,22 @@ export class App {
     };
     w.track.frameAt(p.phys.s, this.frame);
     const f = this.frame.forward;
+    // Buses: every shot further out and above the roofs, so it never ends up inside one of the other buses.
+    const vs = this.vehScale;
+    const up = (vs - 1) * 2.6;
     if (this.shot === 0) {
-      camAt(16 - t * 1.2, 3.5, 1.3);
-      cam.lookAt(pos.x, pos.y + 0.8, pos.z);
+      camAt((16 - t * 1.2) * vs, 3.5 * vs, 1.3 + up);
+      cam.lookAt(pos.x, pos.y + 0.8 * vs, pos.z);
     } else if (this.shot === 1) {
       // Side shot from whichever side has more room (inside a tunnel the far wall is close).
       const side = k > 0.5 ? (p.phys.x > 0 ? -1 : 1) : -1;
       const fx = f.x, fz = f.z;
-      camAt(-3 + t * 0.6, side * 9, 2.2);
-      cam.lookAt(pos.x + fx * 6, pos.y + 0.8, pos.z + fz * 6);
+      camAt((-3 + t * 0.6) * vs, side * 9 * Math.pow(vs, 0.7), 2.2 + up);
+      cam.lookAt(pos.x + fx * 6 * vs, pos.y + 0.8 * vs, pos.z + fz * 6 * vs);
     } else if (this.shot === 2) {
       const fx = f.x, fz = f.z;
-      camAt(-30, 6, 14 - t);
-      cam.lookAt(pos.x + fx * 20, pos.y, pos.z + fz * 20);
+      camAt(-30 * vs, 6, (14 - t) * Math.pow(vs, 0.6));
+      cam.lookAt(pos.x + fx * 20 * vs, pos.y, pos.z + fz * 20 * vs);
     } else {
       this.chase.update(p.car.group, 0.6, dt);
     }
@@ -706,7 +729,8 @@ export class App {
   private applyQuality(): void {
     const q = this.settings.quality;
     const dpr = window.devicePixelRatio;
-    const ratio = q === 'low' ? Math.min(dpr, 1) * 0.75 : q === 'medium' ? Math.min(dpr, 1) : Math.min(dpr, isMobile ? 1.25 : 1.5);
+    // High supersamples (at least 1.5x, up to 2x) so fine shader detail stays crisp instead of shimmering.
+    const ratio = q === 'low' ? Math.min(dpr, 1) * 0.75 : q === 'medium' ? Math.min(dpr, 1.25) : isMobile ? Math.min(dpr, 1.5) : Math.min(Math.max(dpr, 1.5), 2);
     if (Math.abs(this.renderer.webgl.getPixelRatio() - ratio) > 0.01) {
       this.renderer.webgl.setPixelRatio(ratio);
       this.renderer.resize();
@@ -811,6 +835,49 @@ export class App {
     const b = clock.beatAt(now);
     const frac = b - Math.floor(b);
     return { dist: Math.min(frac, 1 - frac), pulse: Math.exp(-frac * 7), frac, index: Math.floor(b) };
+  }
+
+  // Hard-hit detector: watches the music's low end (kick drum). Each kick's energy (integrated over
+  // ~90 ms, steadier than a single peak) is compared with the recent kicks; only clearly harder ones
+  // flash: accents, drops, the full beat coming back in after a break. A steady four-on-the-floor
+  // stays mostly dark.
+  private bassPrev = 0;
+  private kickAvg = 0;
+  private kickSum = 0;
+  private kickWindow = 0;
+  private kickFired = false;
+  private sinceKick = 0;
+  private hitGlow = 0;
+  private hardHit(dt: number, bd: { dist: number } | null): number {
+    const e = this.audio.bassEnergy();
+    this.hitGlow *= Math.exp(-dt * 5);
+    if (e <= 0) return this.hitGlow;
+    // The reference slowly sinks while there are no kicks, so the beat returning after a break hits hard.
+    this.sinceKick += dt;
+    if (this.sinceKick > 1) this.kickAvg *= Math.exp(-dt * 0.4);
+    if (this.kickWindow > 0) {
+      this.kickSum += e * dt;
+      this.kickWindow -= dt;
+      const ratio = this.kickSum / Math.max(this.kickAvg, 1e-12);
+      if (!this.kickFired && this.kickAvg > 0 && ratio > 1.45) {
+        this.kickFired = true; // flash as soon as it is clearly harder, no need to wait for the window
+        this.hitGlow = Math.max(this.hitGlow, Math.min(1, 0.5 + (ratio - 1.45) * 0.5));
+      }
+      if (this.kickWindow <= 0) {
+        // Log-domain average, so one huge hit doesn't mask the next few.
+        const l = Math.log(this.kickSum), avg = this.kickAvg > 0 ? Math.log(this.kickAvg) : l;
+        this.kickAvg = Math.exp(avg + (l - avg) * 0.2);
+      }
+    } else if (e > this.bassPrev * 2 && (!bd || bd.dist < 0.12)) {
+      // A kick starts: sharp rise in the low end, on the beat when the track has a beat clock
+      // (that skips bass-line notes between the beats).
+      this.kickWindow = 0.09;
+      this.sinceKick = 0;
+      this.kickSum = e * dt;
+      this.kickFired = false;
+    }
+    this.bassPrev = e;
+    return this.hitGlow;
   }
 
   private beatChain = 0;
@@ -954,7 +1021,9 @@ export class App {
       w.weather.setFog(serverWeather === 'fog', true);
       w.placeCars(0);
       this.chase.update(w.player.car.group, 0, 1 / 60);
-      try { await this.renderer.webgl.compileAsync(w.scene, this.camera); } catch { /* lazy */ }
+      this.compiling = true; // see startRace: no frame may draw the new world before its shaders are ready
+      try { await this.renderer.precompile(w.scene, this.camera); } catch { /* lazy */ }
+      this.compiling = false;
       if (!this.online || this.world !== w) return;
       this.laps = m.laps;
       this.lastLap = 1;

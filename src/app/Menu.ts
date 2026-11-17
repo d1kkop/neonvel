@@ -443,8 +443,8 @@ export class Menu {
             ? 'Steer hard + tap brake / SPACE at speed to slide; keep steering to hold the drift.'
             : 'Planted and precise. SPACE (handbrake) still kicks the tail out.'}</span></div>
         <div class="row"><span class="label">VHS look</span>
-          <button class="chip ${s.vhs !== false ? 'on' : ''}" data-vhs="1">On</button>
-          <button class="chip ${s.vhs === false ? 'on' : ''}" data-vhs="0">Off</button>
+          <button class="chip ${s.vhs === true ? 'on' : ''}" data-vhs="1">On</button>
+          <button class="chip ${s.vhs !== true ? 'on' : ''}" data-vhs="0">Off</button>
           <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">80s videotape picture, and REWIND (R) in Quick Races — 3 per race. Not in Netplay or the Highway / Heat modes.</span></div>
         <div class="row"><span class="label">AI level</span>
           ${(['easy', 'normal', 'hard', 'impossible'] as const).map((d) => `<button class="chip ${d === (s.difficulty ?? 'normal') ? 'on' : ''}" data-diff="${d}">${d}</button>`).join('')}</div>

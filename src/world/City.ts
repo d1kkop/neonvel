@@ -284,9 +284,9 @@ export class City {
   private buildMeshes(): void {
     const shapes: Record<Shape, { geo: THREE.BufferGeometry; round: number }> = {
       box: { geo: new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), round: 0 },
-      cyl: { geo: new THREE.CylinderGeometry(0.5, 0.5, 1, 28, 1).translate(0, 0.5, 0), round: 4 },
+      cyl: { geo: new THREE.CylinderGeometry(0.5, 0.5, 1, 64, 1).translate(0, 0.5, 0), round: 4 },
       hex: { geo: new THREE.CylinderGeometry(0.5, 0.5, 1, 6, 1).translate(0, 0.5, 0), round: 6 },
-      spire: { geo: new THREE.ConeGeometry(0.5, 1, 12, 1).translate(0, 0.5, 0), round: 4 },
+      spire: { geo: new THREE.ConeGeometry(0.5, 1, 48, 1).translate(0, 0.5, 0), round: 4 },
       pyramid: { geo: new THREE.ConeGeometry(0.7071, 1, 4, 1).rotateY(Math.PI / 4).translate(0, 0.5, 0), round: 4 },
     };
     for (const key of Object.keys(shapes) as Shape[]) {
@@ -483,7 +483,7 @@ export class City {
 
   private buildAntennas(): THREE.InstancedMesh {
     const list = this.antennas;
-    const geo = new THREE.CylinderGeometry(0.25, 0.6, 1, 6).translate(0, 0.5, 0);
+    const geo = new THREE.CylinderGeometry(0.25, 0.6, 1, 16).translate(0, 0.5, 0);
     const mat = applyAtmosphere(new THREE.MeshStandardMaterial({ color: '#1a1822', metalness: 0.7, roughness: 0.4 }));
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length));
     const m = new THREE.Matrix4();
@@ -497,7 +497,7 @@ export class City {
   }
 
   private buildHalos(): THREE.InstancedMesh {
-    const geo = new THREE.TorusGeometry(1, 0.025, 6, 64).rotateX(Math.PI / 2);
+    const geo = new THREE.TorusGeometry(1, 0.025, 12, 128).rotateX(Math.PI / 2);
     const mesh = new THREE.InstancedMesh(geo, applyAtmosphere(new THREE.MeshBasicMaterial({ color: '#ffffff' })), this.halos.length * 2);
     const m = new THREE.Matrix4();
     let i = 0;

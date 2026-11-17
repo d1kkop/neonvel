@@ -43,23 +43,34 @@ function synthLoop(ctx: BaseAudioContext, rpm: number, p: EngineProfile): { buff
   const P = Math.max(8, Math.round(sr / fire));
   const realRpm = (sr / P / (p.cylinders / 2)) * 60;
   const pat = p.firing.length;
-  const firings = pat * Math.max(2, Math.round((0.5 * sr) / (P * pat)));
+  // ~1.4 s loops: long enough that the per-firing variation below doesn't audibly repeat.
+  const firings = pat * Math.max(2, Math.round((1.4 * sr) / (P * pat)));
   const len = P * firings;
   const buf = ctx.createBuffer(1, len, sr);
   const d = buf.getChannelData(0);
   let seed = 98765 + Math.round(rpm) * 7 + p.cylinders * 131;
   const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296) * 2 - 1;
-  const pulseLen = Math.min(P * 3, Math.round(sr * 0.006));
+  const pulseLen = Math.min(P * 3, Math.round(sr * 0.008));
+  const knock = p.diesel ?? 0;
+  const intake = p.intake ?? 0.3;
+  // Slowly wandering combustion strength (real engines never fire twice exactly alike).
+  let wander = 0;
   for (let k = 0; k < firings; k++) {
-    const amp = p.firing[k % pat] * (0.94 + 0.06 * Math.sin(k * 2.3));
-    const jitter = Math.round(Math.sin(k * 1.9) * P * 0.015); // tiny timing irregularity
+    wander += (rnd() * 0.06 - wander * 0.15);
+    const amp = p.firing[k % pat] * (0.9 + 0.1 * rnd() + wander);
+    const jitter = Math.round(rnd() * P * 0.025); // timing irregularity
     const start = k * P + jitter;
+    const kf = 2600 + 1800 * Math.abs(rnd()); // diesel knock ring frequency this firing
     for (let i = 0; i < pulseLen; i++) {
       const t = i / sr;
       // Asymmetric pressure pulse (fast rise, slower fall) + a short combustion noise burst.
       const pulse = (1 - Math.exp(-t / 0.00025)) * Math.exp(-t / 0.0011) - 0.35 * Math.exp(-t / 0.0028) * (1 - Math.exp(-t / 0.0012));
       const noise = rnd() * Math.exp(-t / 0.0016) * p.rasp * 0.5;
-      d[((start + i) % len + len) % len] += amp * (pulse + noise);
+      // Diesel: the hard pressure rise rings the block — a sharp metallic "clack" on every firing.
+      const clack = knock ? Math.sin(2 * Math.PI * kf * t) * Math.exp(-t / 0.0006) * knock * 0.55 : 0;
+      // Induction roar: breathy noise that lasts a little longer than the pulse.
+      const roar = rnd() * Math.exp(-t / 0.0035) * intake * 0.18;
+      d[((start + i) % len + len) % len] += amp * (pulse + noise + clack + roar);
     }
   }
   // Exhaust pipe: comb resonance y[n] = x[n] + g * y[n - D].
@@ -88,7 +99,7 @@ function synthLoop(ctx: BaseAudioContext, rpm: number, p: EngineProfile): { buff
   mean /= len;
   let peak = 0;
   for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(d[i] - mean));
-  const drive = 1.2 + p.rasp * 2.2;
+  const drive = 1.0 + p.rasp * 1.3; // less saturation: grit without the buzzy fuzz
   for (let i = 0; i < len; i++) d[i] = Math.tanh(((d[i] - mean) / peak) * drive) / Math.tanh(drive) * 0.9;
   return { buffer: buf, rpm: realRpm };
 }
@@ -105,6 +116,11 @@ export class EngineSound {
   private readonly squealA: BiquadFilterNode;
   private readonly squealB: BiquadFilterNode;
   private readonly squealGain: GainNode;
+  private readonly fanGain: GainNode;
+  private readonly fanFilter: BiquadFilterNode;
+  private readonly turboOsc: OscillatorNode;
+  private readonly turboGain: GainNode;
+  private lastSpeed01 = 0;
   private lastThrottle = 0;
   private lastGear = 1;
   private highThrottleTime = 0;
@@ -127,7 +143,7 @@ export class EngineSound {
     this.tone.Q.value = 0.9;
     this.tone.frequency.value = 2000;
     this.drive = ctx.createWaveShaper();
-    this.drive.curve = driveCurve(1.8);
+    this.drive.curve = driveCurve(1.25);
     this.drive.oversample = '2x';
     this.limiter = ctx.createGain();
     this.body = ctx.createGain();
@@ -150,6 +166,24 @@ export class EngineSound {
     this.whineGain.gain.value = 0;
     this.whine.connect(this.whineGain).connect(this.out);
     this.whine.start();
+
+    // Cooling fan (buses): a broad, steady whoosh that rises a little with the revs.
+    const fan = noiseSource(ctx, true);
+    this.fanFilter = ctx.createBiquadFilter();
+    this.fanFilter.type = 'bandpass';
+    this.fanFilter.frequency.value = 450;
+    this.fanFilter.Q.value = 0.6;
+    this.fanGain = ctx.createGain();
+    this.fanGain.gain.value = 0;
+    fan.connect(this.fanFilter).connect(this.fanGain).connect(this.out);
+    fan.start();
+    // Turbo whistle: a high, thin tone rising with revs and boost.
+    this.turboOsc = ctx.createOscillator();
+    this.turboOsc.type = 'sine';
+    this.turboGain = ctx.createGain();
+    this.turboGain.gain.value = 0;
+    this.turboOsc.connect(this.turboGain).connect(this.out);
+    this.turboOsc.start();
 
     // Tyre squeal: two resonant noise bands, slightly wobbling.
     const n = noiseSource(ctx, true);
@@ -308,8 +342,18 @@ export class EngineSound {
     }
     this.lastThrottle = thr;
 
+    // Supercharger-style whine only on petrol engines; turbos get a real whistle (high, load-dependent).
     this.whine.frequency.setTargetAtTime((rpm / 60) * 9, t, 0.03);
-    this.whineGain.gain.setTargetAtTime(active ? (0.002 + thr * 0.03 * (rpm / P.redline)) * P.turbo : 0, t, 0.1);
+    this.whineGain.gain.setTargetAtTime(active && !P.diesel ? (0.002 + thr * 0.02 * (rpm / P.redline)) * P.turbo : 0, t, 0.1);
+    const r01 = rpm / P.redline;
+    this.turboOsc.frequency.setTargetAtTime(2400 + r01 * 5200 + thr * 600, t, 0.12);
+    this.turboGain.gain.setTargetAtTime(active ? P.turbo * thr * (0.004 + 0.012 * r01) : 0, t, 0.15);
+    const fanK = P.fan ?? 0;
+    this.fanGain.gain.setTargetAtTime(active ? fanK * (0.05 + 0.05 * r01) : 0, t, 0.3);
+    this.fanFilter.frequency.setTargetAtTime(380 + r01 * 260, t, 0.3);
+    // Air brakes: the big "pssht" when the bus comes to a stop.
+    if (P.airBrakes && active && this.lastSpeed01 > 0.04 && s.speed01 <= 0.04) this.airHiss();
+    this.lastSpeed01 = s.speed01;
 
     // Tyres.
     const sq = active ? Math.pow(Math.max(0, s.slip - 0.15) / 0.85, 1.3) * Math.min(1, s.speed01 * 3) : 0;
@@ -335,6 +379,24 @@ export class EngineSound {
     n.connect(bp).connect(g).connect(this.out);
     n.start(t);
     n.stop(t + 0.1);
+  }
+
+  /** Air brakes releasing at a stop: a loud, airy hiss with a little rattle. */
+  private airHiss(): void {
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const n = noiseSource(ctx);
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 2200;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.32, t + 0.03);
+    g.gain.setValueAtTime(0.32, t + 0.25);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+    n.connect(hp).connect(g).connect(this.out);
+    n.start(t);
+    n.stop(t + 1.0);
   }
 
   /** Turbo blow-off valve "pssh". */

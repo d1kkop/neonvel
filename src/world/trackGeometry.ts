@@ -8,8 +8,10 @@ export interface ExtrudeOpts {
   /** Distance range along the track (defaults to the whole loop). */
   d0?: number;
   d1?: number;
-  /** Sampling step in metres. */
+  /** Sampling step in metres (default 1). */
   step?: number;
+  /** Share vertices across the profile so the cross-section is smooth-shaded (curved profiles). */
+  smooth?: boolean;
 }
 
 /**
@@ -19,12 +21,13 @@ export interface ExtrudeOpts {
 export function extrude(track: LoopTrack, profile: [number, number][], opts: ExtrudeOpts = {}): THREE.BufferGeometry {
   const d0 = opts.d0 ?? 0;
   const d1 = opts.d1 ?? track.length;
-  const step = opts.step ?? 2;
+  const step = opts.step ?? 1;
   const n = Math.max(1, Math.ceil((d1 - d0) / step));
   const frame = makeFrame();
   const pos: number[] = [];
   const uv: number[] = [];
   const idx: number[] = [];
+  if (opts.smooth) return extrudeSmooth(track, profile, d0, d1, n, !!opts.closedProfile);
   const segs = opts.closedProfile ? profile.length : profile.length - 1;
   let uAcc = 0;
   for (let s = 0; s < segs; s++) {
@@ -53,6 +56,51 @@ export function extrude(track: LoopTrack, profile: [number, number][], opts: Ext
   g.setIndex(idx);
   g.computeVertexNormals();
   return g;
+}
+
+/** One shared vertex grid (profile × along): normals blend across the profile. */
+function extrudeSmooth(track: LoopTrack, profile: [number, number][], d0: number, d1: number, n: number, closed: boolean): THREE.BufferGeometry {
+  const frame = makeFrame();
+  const P = profile.length;
+  const cols = closed ? P + 1 : P;
+  const pos: number[] = [];
+  const uv: number[] = [];
+  const idx: number[] = [];
+  const u: number[] = [0];
+  for (let k = 1; k < cols; k++) {
+    const [la, ha] = profile[(k - 1) % P], [lb, hb] = profile[k % P];
+    u.push(u[k - 1] + Math.hypot(lb - la, hb - ha));
+  }
+  for (let i = 0; i <= n; i++) {
+    const d = d0 + ((d1 - d0) * i) / n;
+    track.frameAt(d, frame);
+    const p = frame.position, r = frame.right;
+    for (let k = 0; k < cols; k++) {
+      const [l, h] = profile[k % P];
+      pos.push(p.x + r.x * l, p.y + h, p.z + r.z * l);
+      uv.push(u[k], d);
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < cols - 1; k++) {
+      const a = i * cols + k, b = a + cols;
+      idx.push(a, a + 1, b, a + 1, b + 1, b);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Smooth closed tube profile (circle of radius r around (lat, h)). */
+export function tubeProfile(lat: number, h: number, r: number, segs = 16): [number, number][] {
+  return Array.from({ length: segs }, (_, i) => {
+    const a = (i / segs) * Math.PI * 2;
+    return [lat + Math.cos(a) * r, h + Math.sin(a) * r] as [number, number];
+  });
 }
 
 /** Profile for a closed rectangle centred at (lat, h). */

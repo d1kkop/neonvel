@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { aiInput, type AiDriver } from './CarPhysics';
 import type { CarEntry, StepEvents, World } from './World';
+import { haloTexture } from './car/CarBuilder';
 
 /**
  * Extra game modes on top of the race tracks:
@@ -166,7 +167,7 @@ export class HighwayMode implements GameMode {
 
 interface Cop {
   car: CarEntry;
-  bar: { red: THREE.MeshBasicMaterial; blue: THREE.MeshBasicMaterial };
+  bar: { red: THREE.MeshBasicMaterial; blue: THREE.MeshBasicMaterial; redHalo: THREE.SpriteMaterial; blueHalo: THREE.SpriteMaterial };
   ai: AiDriver;
   block?: boolean;
 }
@@ -194,18 +195,34 @@ export class HeatMode implements GameMode {
     this.spawnCop(w, -140);
   }
 
+  /**
+   * Roof light bar: black housing with a red and a blue lens, as bright as a braking tail light (same HDR
+   * level, so bloom makes them glow), each with a soft additive halo. (No real point light: adding lights
+   * mid-race would recompile every shader and hitch.)
+   */
   private makeLightBar(c: CarEntry): Cop['bar'] {
-    const red = new THREE.MeshBasicMaterial({ color: '#ff1030' });
-    const blue = new THREE.MeshBasicMaterial({ color: '#1060ff' });
+    const red = new THREE.MeshBasicMaterial({ color: '#ff1030', fog: false });
+    const blue = new THREE.MeshBasicMaterial({ color: '#1060ff', fog: false });
     const roofT = c.car.style.cabin[1][0];
     const roofY = c.car.style.cabin[1][1];
     const z = -c.car.style.length / 2 + roofT * c.car.style.length + 0.25;
-    for (const [mat, x] of [[red, -0.32], [blue, 0.32]] as const) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.2), mat);
-      m.position.set(x, roofY + 0.07, z);
-      c.car.group.add(m);
+    const housing = new THREE.Mesh(new THREE.BoxGeometry(1.22, 0.1, 0.3), new THREE.MeshStandardMaterial({ color: '#0a0a0e', metalness: 0.6, roughness: 0.35 }));
+    housing.position.set(0, roofY + 0.04, z);
+    c.car.group.add(housing);
+    const mk = (col: string) => new THREE.SpriteMaterial({ map: haloTexture(), color: col, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0, fog: false });
+    const redHalo = mk('#ff2040'), blueHalo = mk('#2a70ff');
+    for (const [mat, hm, x] of [[red, redHalo, -0.3], [blue, blueHalo, 0.3]] as const) {
+      const lens = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.12, 0.24), mat);
+      lens.position.set(x, roofY + 0.1, z);
+      c.car.group.add(lens);
+      for (const zz of [-0.13, 0.13]) {
+        const h = new THREE.Sprite(hm);
+        h.scale.setScalar(3.0);
+        h.position.set(x, roofY + 0.1, z + zz);
+        c.car.group.add(h);
+      }
     }
-    return { red, blue };
+    return { red, blue, redHalo, blueHalo };
   }
 
   private spawnCop(w: World, ds: number, block?: { x: number }): void {
@@ -299,10 +316,15 @@ export class HeatMode implements GameMode {
 
   frame(dt: number): void {
     this.flash += dt;
-    const on = Math.floor(this.flash * 7) % 2 === 0;
+    // Wig-wag with a double flash per side (red, red, blue, blue), at brake-light brightness.
+    const k = Math.floor(this.flash * 12) % 8;
+    const redOn = k === 0 || k === 2, blueOn = k === 4 || k === 6;
     for (const c of this.cops) {
-      c.bar.red.color.set(on ? '#ff1030' : '#200006').multiplyScalar(on ? 4 : 1);
-      c.bar.blue.color.set(on ? '#080a20' : '#1060ff').multiplyScalar(on ? 1 : 4);
+      const b = c.bar;
+      b.red.color.set('#ff1030').multiplyScalar(redOn ? 12 : 0.25);
+      b.blue.color.set('#1060ff').multiplyScalar(blueOn ? 14 : 0.25);
+      b.redHalo.opacity = redOn ? 1 : 0;
+      b.blueHalo.opacity = blueOn ? 1 : 0;
     }
   }
 
