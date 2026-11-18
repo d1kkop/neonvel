@@ -12,6 +12,11 @@ export class Renderer {
   readonly webgl: THREE.WebGLRenderer;
   readonly composer: EffectComposer;
   readonly bloom: UnrealBloomPass;
+  /**
+   * Player's "Lighting" option, 0.5 (toned down) .. 1 (as designed, the default): scales the glow (bloom) of
+   * every light and, a little, the overall exposure. Applied by World every frame.
+   */
+  lighting = 1;
   private readonly renderPass: RenderPass;
   /** VHS look (after the output pass): strength 0 = off, rewind 0..1 = heavy tape distortion. */
   readonly vhs: ShaderPass;

@@ -12,8 +12,6 @@ export interface MinimapCar {
   gap: number;
   /** Small dot, hidden when out of range (traffic). */
   minor?: boolean;
-  /** Pinned to the rim when out of range, but without a gap label (police). */
-  noLabel?: boolean;
 }
 
 const RANGE = 230; // metres from the centre to the rim

@@ -11,10 +11,14 @@ export const neonSkyway: LevelDef = {
   time: 'night',
   seed: 1337,
   track: {
+    // The last third used to have three corners that were too tight to take cleanly: a 51 m right-hander into
+    // the second canopy, a 22 m hairpin under it and a 43 m right-hander 28 m before the last tunnel. Each is
+    // now drawn with two or more points (a wider arc): about 56 m, 38 m and 91 m radius.
     points: [
       [0, 0], [420, -40], [760, 60], [880, 340], [760, 600], [520, 640],
-      [380, 820], [120, 900], [-180, 820], [-260, 600], [-120, 440], [-380, 300],
-      [-520, 120], [-360, -20],
+      [380, 820], [120, 900], [-180, 820], [-245, 700], [-255, 615],
+      [-200, 540], [-125, 470], [-135, 405], [-210, 365],
+      [-380, 300], [-477, 175], [-467, 74], [-360, -20],
     ],
     length: 2800,
     height: 150,

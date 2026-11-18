@@ -45,8 +45,55 @@ db.exec(`
 const qFind = db.prepare('SELECT id, name, rating, games, wins FROM players WHERE name = ?');
 const qInsert = db.prepare('INSERT INTO players (id, name, rating, games, wins, created) VALUES (?, ?, ?, 0, 0, ?)');
 const qUpdate = db.prepare('UPDATE players SET rating = ?, games = games + 1, wins = wins + ? WHERE id = ?');
-const qTop = db.prepare('SELECT name, rating, games, wins FROM players WHERE games > 0 ORDER BY rating DESC LIMIT 25');
+const qTop = db.prepare('SELECT name, rating, games, wins FROM players WHERE games > 0 ORDER BY rating DESC LIMIT 50');
 const qRace = db.prepare('INSERT INTO races (id, level, finished, result) VALUES (?, ?, ?, ?)');
+
+// Track records: every driver's fastest single lap per level (milliseconds), from any race, online or
+// against the AI. Reported by the game itself, so only a sanity check is possible (no lap faster than the
+// track's length at 150 m/s).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS lap_times (
+    player_id TEXT NOT NULL,
+    level TEXT NOT NULL,
+    ms INTEGER NOT NULL,
+    car TEXT NOT NULL DEFAULT '',
+    created INTEGER NOT NULL,
+    PRIMARY KEY (player_id, level)
+  );
+  CREATE INDEX IF NOT EXISTS lap_times_level ON lap_times (level, ms);
+`);
+const qLapGet = db.prepare('SELECT ms FROM lap_times WHERE player_id = ? AND level = ?');
+const qLapSet = db.prepare(`INSERT INTO lap_times (player_id, level, ms, car, created) VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT (player_id, level) DO UPDATE SET ms = excluded.ms, car = excluded.car, created = excluded.created WHERE excluded.ms < lap_times.ms`);
+const qLapTop = db.prepare('SELECT p.name AS name, l.ms AS ms, l.car AS car FROM lap_times l JOIN players p ON p.id = l.player_id WHERE l.level = ? ORDER BY l.ms ASC, l.created ASC LIMIT 50');
+const qLapRank = db.prepare('SELECT COUNT(*) AS n FROM lap_times WHERE level = ? AND ms < ?');
+const qLapCount = db.prepare('SELECT COUNT(*) AS n FROM lap_times WHERE level = ?');
+/** Shortest believable lap per level (ms): lap length (m) at 150 m/s. */
+const MIN_LAP_MS: Record<string, number> = {
+  'neon-skyway': 2800, 'palm-coast': 3200, 'desert-mirage': 3000, 'harbor-docks': 3000, 'snow-pass': 3000, 'cyber-grid': 2600, 'orbit-run': 3000, 'deep-blue': 3000,
+};
+
+function submitLap(name: string, level: string, ms: number, car: string): Record<string, unknown> {
+  if (!LEVELS.includes(level)) return { error: 'Unknown level.' };
+  if (!Number.isFinite(ms) || ms < (MIN_LAP_MS[level] / 150) * 1000 || ms > 30 * 60 * 1000) return { error: 'Lap time rejected.' };
+  const player = getOrCreate(name);
+  const before = (qLapGet.get(player.id, level) as { ms: number } | undefined)?.ms;
+  qLapSet.run(player.id, level, Math.round(ms), car.slice(0, 24), Date.now());
+  const best = (qLapGet.get(player.id, level) as { ms: number }).ms;
+  return { best, improved: before === undefined || best < before, rank: (qLapRank.get(level, best) as { n: number }).n + 1 };
+}
+
+/** Top 50 of a track, plus where `name` stands (also when outside the top 50). */
+function lapBoard(level: string, name: string): Record<string, unknown> {
+  const top = qLapTop.all(level) as { name: string; ms: number; car: string }[];
+  let me: { rank: number; ms: number } | null = null;
+  const player = name ? (qFind.get(name) as PlayerRow | undefined) : undefined;
+  if (player) {
+    const row = qLapGet.get(player.id, level) as { ms: number } | undefined;
+    if (row) me = { rank: (qLapRank.get(level, row.ms) as { n: number }).n + 1, ms: row.ms };
+  }
+  return { level, top, me, total: (qLapCount.get(level) as { n: number }).n };
+}
 
 // ------------------------------------------------------------------ store (car purchases)
 //
@@ -472,6 +519,16 @@ const httpServer = http.createServer(async (req, res) => {
       return json(await checkout(name, String(body.item ?? '')));
     }
     if (url.pathname === '/store/confirm') return json(await confirm(String(url.searchParams.get('session_id') ?? '')));
+    if (url.pathname === '/laptimes') {
+      const name = String(url.searchParams.get('name') ?? '').trim().slice(0, 16);
+      return json(lapBoard(String(url.searchParams.get('level') ?? ''), name));
+    }
+    if (url.pathname === '/laptime' && req.method === 'POST') {
+      const body = await readJson(req);
+      const name = String(body.name ?? '').trim().replace(/[^\w .\-]/g, '').slice(0, 16);
+      if (!name) return json({ error: 'No driver name.' }, 400);
+      return json(submitLap(name, String(body.level ?? ''), Number(body.ms), String(body.car ?? '')));
+    }
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }

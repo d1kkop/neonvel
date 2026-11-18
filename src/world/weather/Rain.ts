@@ -50,7 +50,9 @@ export class Rain {
         uniform vec2 uWind;
         varying float vAlpha;
         varying vec2 vUv;
+        varying vec3 vFlake; // snow: x = length / width of the flake's streak, y = how much of a crystal shows, z = spin
         void main() {
+          vFlake = vec3(1.0, 0.0, 0.0);
           // Thin out the rain by intensity: drops above the threshold are collapsed.
           float keep = step(aOffset.w, uIntensity);
           float fall = uFall * (0.85 + 0.3 * aOffset.w);
@@ -62,8 +64,13 @@ export class Rain {
           #endif
           vec3 p = aOffset.xyz * uBox + vel * uTime;
           #if MODE == 1
-            p.x += sin(uTime * 1.3 + aOffset.w * 40.0) * 0.6;
-            p.z += cos(uTime * 1.1 + aOffset.w * 31.0) * 0.6;
+            // Snow drifts together: slow gusts that sweep through the whole fall (neighbouring flakes move alike),
+            // and only a small flutter of each flake's own. (Big independent wobbles made it look like noise.)
+            vec3 home = aOffset.xyz * uBox;
+            vec2 gust = vec2(sin(uTime * 0.45 + home.z * 0.05 + home.y * 0.08), cos(uTime * 0.37 + home.x * 0.05 + home.y * 0.06));
+            p.xz += gust * 1.5;
+            p.x += sin(uTime * 2.1 + aOffset.w * 40.0) * 0.12;
+            p.z += cos(uTime * 1.7 + aOffset.w * 31.0) * 0.12;
           #elif MODE == 2
             p.x += sin(uTime * 3.0 + aOffset.w * 40.0) * 0.15;
           #endif
@@ -74,23 +81,56 @@ export class Rain {
           float speed = length(rel);
           vec3 dir = rel / max(speed, 1e-3);
           float len = clamp(speed * 0.022, 0.25, 2.2);
-          #if MODE != 0
+          float halfW = (MODE == 0 ? 0.011 : 0.045) * (1.0 + length(cameraPosition - p) * 0.02);
+          #if MODE == 2
             len = 0.09 + aOffset.w * 0.05;
+          #elif MODE == 1
+            // Flakes: mostly small, some medium, a few big soft ones. Driving fast, every flake becomes a short
+            // streak along the way it rushes past the car, so the snow visibly streams toward and around you.
+            float kind = fract(aOffset.w * 7.31);
+            float size = kind > 0.94 ? 0.085 : mix(0.022, 0.045, kind);
+            halfW = size * (1.0 + length(cameraPosition - p) * 0.035);
+            rel = vel - uCamVel * 0.6;
+            speed = length(rel);
+            dir = rel / max(speed, 1e-3);
+            len = max(halfW * 2.0, min(speed * 0.009, 0.7));
+            vFlake = vec3(len / (halfW * 2.0), kind > 0.94 ? 1.0 : smoothstep(0.5, 0.9, kind) * 0.6, aOffset.w * 6.283 + uTime * (0.6 + aOffset.z));
           #endif
           vec3 toCam = normalize(cameraPosition - p);
           vec3 sc = cross(dir, toCam);
-          vec3 side = sc / max(length(sc), 1e-4) * (MODE == 0 ? 0.011 : 0.045) * (1.0 + length(cameraPosition - p) * 0.02);
-          vec3 world = p - dir * len * position.y + side * position.x * 2.0;
+          vec3 side = sc / max(length(sc), 1e-4) * halfW;
+          vec3 world = p - dir * len * (position.y - (MODE == 1 ? 0.5 : 0.0)) + side * position.x * 2.0;
           vUv = uv;
           float dist = length(cameraPosition - p);
           vAlpha = keep * (1.0 - smoothstep(14.0, 24.0, dist)) * smoothstep(0.5, 2.0, dist) * (0.4 + 0.6 * aOffset.w);
+          #if MODE == 1
+            // A streak spreads the same light over more pixels.
+            vAlpha *= mix(1.0, 0.5, clamp((vFlake.x - 1.0) / 5.0, 0.0, 1.0)) * 1.15;
+          #endif
           gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
         }`,
       fragmentShader: /* glsl */ `
         uniform vec3 uHazeColor;
         varying float vAlpha;
         varying vec2 vUv;
+        varying vec3 vFlake;
         void main() {
+          #if MODE == 1
+            // A soft round flake stretched into a capsule along its streak; slow flakes show a six-armed crystal.
+            vec2 q = vec2((vUv.x - 0.5) * 2.0, (vUv.y - 0.5) * 2.0 * vFlake.x);
+            q.y = sign(q.y) * max(abs(q.y) - (vFlake.x - 1.0), 0.0);
+            float rr = length(q);
+            float body = 1.0 - smoothstep(0.0, 1.0, rr);
+            body = body * body * (0.7 + 0.5 * (1.0 - smoothstep(0.0, 0.4, rr)));    // bright heart, soft edge
+            // A streak is brightest at its head and thins out toward its tail.
+            body *= mix(1.0, 0.35 + 0.65 * vUv.y, clamp(vFlake.x - 1.0, 0.0, 1.0));
+            float ang = atan(q.y, q.x) + vFlake.z;
+            float arms = pow(abs(cos(ang * 3.0)), 14.0) * (1.0 - smoothstep(0.1, 0.95, rr));
+            float crystal = vFlake.y * (1.0 - clamp((vFlake.x - 1.0) * 1.5, 0.0, 1.0));
+            float shape = mix(body, body * 0.45 + arms * 1.3, crystal);
+            gl_FragColor = vec4(vec3(0.9, 0.95, 1.0) * shape * vAlpha, 1.0);
+            return;
+          #endif
           float across = 1.0 - abs(vUv.x - 0.5) * 2.0;
           float along = smoothstep(0.0, 0.3, vUv.y) * (1.0 - smoothstep(0.7, 1.0, vUv.y));
           vec3 c = mix(vec3(0.6, 0.7, 1.0), uHazeColor, 0.2) * 0.75;

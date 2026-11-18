@@ -25,6 +25,8 @@ export interface SkyParams {
   sunGlow?: number;
   /** 0..1: hot yellow-white core in the middle of the sun's disc (a sun that reads as a light source). */
   sunCore?: number;
+  /** 0..1.5: glare in the sky around the sun (a hot ring at the disc plus a wide warm glow). 0 / unset = off. */
+  sunHalo?: number;
   aurora?: number;
   nebula?: number;
   gridHorizon?: number;
@@ -86,9 +88,15 @@ export interface LevelBuildContext {
   onUpdate(fn: (time: number, dt: number) => void): void;
   /** The player's car in track coordinates (for creatures that follow you). */
   player(): { s: number; x: number; v: number };
-  /** Play a one-shot level sound effect (e.g. dolphin whistle). */
-  sound?(kind: 'dolphin'): void;
+  /** Play a one-shot level sound effect (dolphin whistle, meteor impact, the saucer shooting off). */
+  sound?(kind: LevelSound): void;
+  /** The level's billboards (centre, width, height). Filled in after build(): call it from an update, not while building. */
+  boards(): { pos: THREE.Vector3; w: number; h: number }[];
+  /** Shake the player's camera (0..1), e.g. for an impact nearby. */
+  shake?(amount: number): void;
 }
+
+export type LevelSound = 'dolphin' | 'meteor' | 'ufo' | 'hiss';
 
 /** What a level's build() returns for the shared systems. */
 export interface LevelBuildResult {
@@ -96,6 +104,8 @@ export interface LevelBuildResult {
   roofSpots?: { x: number; z: number; y: number; w: number; d: number; yaw: number }[];
   /** Screens mounted on building faces. */
   faceSpots?: { pos: THREE.Vector3; normal: THREE.Vector3; w: number; h: number }[];
+  /** Stretches of roadside (track metres) where no billboard may stand; side -1 (left) / 1 (right), 0 = both. */
+  noBoards?: { d0: number; d1: number; side: number }[];
   /** Rooftop searchlight positions. */
   searchlights?: THREE.Vector3[];
 }

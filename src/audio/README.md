@@ -10,7 +10,8 @@ An optional bundled track is listed in `public/audio/manifest.json`.
 - `SynthwaveMusic.ts` — `Music`: starts the procedural loop immediately, then crossfades to the first manifest track
   once decoded. `SynthwaveLoop`: 116 BPM outrun loop (Am–F–C–G), detuned octave saw bass, gated saw pad,
   square lead arpeggio with dotted-8th delay, kick / snare / hats, 16-bar arrangement (intro, breakdown).
-  Lookahead scheduler (25 ms timer, 120 ms ahead on the AudioContext clock).
+  Lookahead scheduler (`StepClock` in `dsp.ts`: 25 ms timer, 0.9 s ahead on the AudioContext clock, so slow
+  frames on the main thread can't make the music stutter).
 - `Sfx.ts` — continuous engine (2 detuned saws + square sub + combustion noise → waveshaper → lowpass, 5-gear rpm
   model with shift pops), wind noise, environment (reverb send / lowpass / rumble for `open` | `canopy` | `tunnel`,
   automatic whoosh on tunnel entry/exit). One-shots: `whoosh`, `passBy`, `countdown(3|2|1|0)`, `scrape`, `impact`,

@@ -92,6 +92,12 @@ table.lb { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 
 table.lb th { text-align: left; color: var(--cyan); font-size: 11px; letter-spacing: .12em; padding: 6px; border-bottom: 1px solid rgba(0, 229, 255, .3); }
 table.lb td { padding: 6px; border-bottom: 1px solid rgba(255, 255, 255, .06); font-family: Arial, sans-serif; }
 table.lb tr.me td { color: var(--yellow); }
+table.lb tr.gap td { text-align: center; opacity: .5; padding: 2px; border-bottom: none; }
+/* Long boards scroll inside the panel; the header row stays put. */
+.lb-scroll { max-height: 46vh; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--cyan) transparent; }
+.lb-scroll table.lb { margin-top: 0; }
+.lb-scroll thead th { position: sticky; top: 0; background: #12061f; z-index: 1; }
+.lb-tabs { flex-wrap: wrap; gap: 6px; }
 
 /* HUD */
 #hud { position: absolute; inset: 0; display: none; pointer-events: none; }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { LevelDef } from '../levels/types';
+import type { LevelDef, LevelSound } from '../levels/types';
 import { atmosphere } from '../render/atmosphere';
 import { createEnvironment, Renderer } from '../render/Renderer';
 import { LoopTrack, makeFrame } from '../track/Track';
@@ -42,16 +42,14 @@ export interface CarEntry {
   left?: boolean;
   visRoll?: number;
   visPitch?: number;
-  /** Non-racing cars (game modes): traffic drives its lane, police uses `brain`. */
-  kind?: 'traffic' | 'police';
+  /** Non-racing cars (game modes): traffic drives its lane. */
+  kind?: 'traffic';
   /** Traffic: lane offset and cruising speed (m/s). */
   lane?: number;
   cruise?: number;
-  /** Police / scripted drivers: input each step. */
-  brain?: (c: CarEntry, dt: number) => InputState & { handbrake?: number; boost?: number };
 }
 
-/** A car-to-NPC contact this step (for the game modes: crashes into traffic, police rams). */
+/** A car-to-NPC contact this step (for the game modes: crashes into traffic). */
 export interface NpcHit {
   npc: CarEntry;
   car: CarEntry;
@@ -126,8 +124,11 @@ export class World {
   private readonly back = new THREE.Vector3();
   private readonly up = new THREE.Vector3();
   time = 0;
+  private boardSpots: { pos: THREE.Vector3; w: number; h: number }[] = [];
   /** Hook for level one-shot sounds (set by the app). */
-  onLevelSound?: (kind: 'dolphin') => void;
+  onLevelSound?: (kind: LevelSound) => void;
+  /** Hook for level events that shake the camera (set by the app). */
+  onShake?: (amount: number) => void;
 
   constructor(
     readonly level: LevelDef,
@@ -192,8 +193,11 @@ export class World {
         return p ? { s: p.s, x: p.x, v: p.v } : { s: 0, x: 0, v: 0 };
       },
       sound: (kind) => this.onLevelSound?.(kind),
+      shake: (amount) => this.onShake?.(amount),
+      boards: () => this.boardSpots,
     });
-    const billboards = new Billboards(this.track, built.roofSpots ?? [], built.faceSpots ?? [], L.seed, L.billboards, L.billboardStyle ?? 'neon');
+    const billboards = new Billboards(this.track, built.roofSpots ?? [], built.faceSpots ?? [], L.seed, L.billboards, L.billboardStyle ?? 'neon', built.noBoards);
+    this.boardSpots = billboards.spots;
     if (billboards.update) this.updaters.push((t) => billboards.update!(t));
     this.scene.add(billboards.group);
 
@@ -313,12 +317,12 @@ export class World {
     return ev;
   }
 
-  // ------------------------------------------------------------- game-mode cars (traffic, police)
+  // ------------------------------------------------------------- game-mode cars (traffic)
 
-  /** Traffic and police: not part of the race standings, but driven, collided and drawn like the others. */
+  /** Traffic: not part of the race standings, but driven, collided and drawn like the others. */
   readonly npcs: CarEntry[] = [];
 
-  addNpc(o: { setup: CarSetup; s: number; x: number; kind: 'traffic' | 'police'; cruise?: number; brain?: CarEntry['brain'] }): CarEntry {
+  addNpc(o: { setup: CarSetup; s: number; x: number; kind: 'traffic'; cruise?: number }): CarEntry {
     const car = buildCar({ style: o.setup.style, paint: o.setup.paint, accent: o.setup.accent, tier: o.setup.tier });
     car.group.add(createHeadlightBeams(car.style.width, 18, -car.style.length / 2, 0.55, this.level.time === 'day' ? 0.25 : 0.6));
     for (const w of car.wheels) w.rotation.order = 'YXZ';
@@ -327,7 +331,7 @@ export class World {
     const phys = createPhys(o.s, o.x);
     phys.v = o.cruise ?? 0;
     phys.boost = 0;
-    const e: CarEntry = { car, name: o.kind, phys, spec, ai: null, isPlayer: false, input: { throttle: 0, brake: 0, steer: 0 }, kind: o.kind, lane: o.x, cruise: o.cruise, brain: o.brain };
+    const e: CarEntry = { car, name: o.kind, phys, spec, ai: null, isPlayer: false, input: { throttle: 0, brake: 0, steer: 0 }, kind: o.kind, lane: o.x, cruise: o.cruise };
     this.npcs.push(e);
     return e;
   }
@@ -341,14 +345,8 @@ export class World {
   }
 
   private stepNpcs(dt: number, ev: StepEvents): void {
-    const all = this.cars.map((c) => c.phys).concat(this.npcs.map((n) => n.phys));
     for (const n of this.npcs) {
       const p = n.phys;
-      if (n.brain) {
-        n.input = n.brain(n, dt);
-        stepPhys(p, n.input, n.spec, this.track, dt);
-        continue;
-      }
       // Traffic: holds its lane and cruising speed (recovers after being knocked about).
       p.ps = p.s; p.px = p.x; p.ppsi = p.psi;
       const target = n.cruise ?? 25;
@@ -359,7 +357,6 @@ export class World {
       p.phi = p.psi;
       p.drift = 0;
       n.input = { throttle: 0.4, brake: p.v > target + 2 ? 0.6 : 0, steer: 0 };
-      void all;
     }
     const wallLimit = this.track.width / 2 - 1.2;
     for (const n of this.npcs) {
@@ -370,13 +367,6 @@ export class World {
           ev.npcHits.push({ npc: n, car: c, strength: hit });
           if (c.isPlayer) ev.playerHit = Math.max(ev.playerHit, hit);
         }
-      }
-    }
-    // Police vs traffic (they bump through it).
-    for (let i = 0; i < this.npcs.length; i++) {
-      for (let j = i + 1; j < this.npcs.length; j++) {
-        if (this.npcs[i].kind === 'traffic' && this.npcs[j].kind === 'traffic') continue;
-        collidePhys(this.npcs[i].phys, this.npcs[j].phys, this.npcs[i].spec, this.track.length, wallLimit);
       }
     }
   }
@@ -506,7 +496,11 @@ export class World {
     this.groundMist.update(mist, this.cars[0]?.phys.s ?? 0);
     const bloom = this.level.lighting.bloom;
     atmosphere.uBeatHit.value = this.beatHit;
-    this.renderer.bloom.strength = bloom.strength * (1 + mist * 1.1) * (1 + 0.18 * this.beatPulse + 0.3 * this.beatHit);
+    atmosphere.uBeatPulse.value = this.beatPulse;
+    // The player's Lighting option: at its lowest the glow is about a third and the picture 12 % darker.
+    const lk = this.renderer.lighting;
+    this.renderer.bloom.strength = bloom.strength * (1 + mist * 1.1) * (1 + 0.18 * this.beatPulse + 0.3 * this.beatHit) * (lk * 1.35 - 0.35);
+    this.renderer.webgl.toneMappingExposure = this.level.lighting.exposure * (0.76 + 0.24 * lk);
     this.road.setBeatPulse(this.beatPulse);
     this.renderer.bloom.radius = Math.min(1, bloom.radius + mist * 0.45);
     setCarFogGlow(mist * (this.level.time === 'day' ? 0.35 : 1));

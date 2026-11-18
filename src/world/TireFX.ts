@@ -210,6 +210,11 @@ export class TireFX {
     for (const c of cars) {
       if (c.left || !c.car.group.visible) continue;
       const p = c.phys;
+      // A pack of cars: each one throws up a bit less cloud (smoke, spray mist, powder), so the pack does not
+      // disappear in one big white-out. From 6 cars within 45 m: 60 % of the clouds, down to 45 % for 10+.
+      let pack = 0;
+      for (const o of cars) if (!o.left && o.car.group.visible && o.car.group.position.distanceToSquared(c.car.group.position) < 45 * 45) pack++;
+      const thin = pack >= 6 ? Math.max(0.45, 0.6 - 0.04 * (pack - 6)) : 1;
       const sliding = Math.max(p.drift > 0.25 ? p.drift : 0, p.slip > 0.4 ? p.slip : 0, (c.input.handbrake ?? 0) > 0.3 && p.v > 5 ? 0.8 : 0);
       let last = this.last.get(c);
       if (!last) this.last.set(c, (last = [null, null]));
@@ -242,7 +247,7 @@ export class TireFX {
               v.y = 2 + Math.random() * 4.5;
               this.spawn(this.w.clone(), v, 0.5 + Math.random() * 0.5, 0.06 + Math.random() * 0.12, 1, 1);
             }
-            if (Math.random() < 0.9 * rate * wet) {
+            if (Math.random() < 0.9 * rate * wet * thin) {
               const v = this.vel.clone().multiplyScalar(0.4 + Math.random() * 0.3).addScaledVector(this.side, out * (0.5 + Math.random() * 2.5));
               v.y = 0.6 + Math.random();
               this.spawn(this.w.clone().setY(this.w.y + 0.4), v, 0.8 + Math.random() * 0.6, 0.7 + Math.random() * 0.7, 2, 1);
@@ -250,7 +255,7 @@ export class TireFX {
           }
           if (fx.precip === 'snow') {
             // Powder snow thrown up behind the car.
-            for (let n = 0; n < Math.round(1.4 * rate); n++) {
+            for (let n = 0, cnt = Math.floor(1.4 * rate * thin + Math.random()); n < cnt; n++) {
               const v = this.vel.clone().multiplyScalar(0.3 + Math.random() * 0.35).addScaledVector(this.side, out * (Math.random() * 2.5 - 0.5));
               v.y = 0.6 + Math.random() * 1.6;
               this.spawn(this.w.clone().setY(this.w.y + 0.2), v, 1.0 + Math.random() * 0.9, 0.5 + Math.random() * 0.9, 4, 1);
@@ -272,7 +277,7 @@ export class TireFX {
             n -= 1;
           }
           // Mist: soft churning clouds of different sizes trailing the wheel.
-          if (Math.random() < amount * 0.75 * rate) {
+          if (Math.random() < amount * 0.75 * rate * thin) {
             const v = this.vel.clone().multiplyScalar(0.55 + Math.random() * 0.35).addScaledVector(this.side, out * (Math.random() * 1.4 - 0.2));
             v.y = 0.15 + Math.random() * 0.8;
             const d = this.w.clone().addScaledVector(this.side, out * Math.random() * 0.25);
@@ -280,7 +285,7 @@ export class TireFX {
             this.spawn(d, v, 0.6 + Math.random() * 0.8, 0.3 + Math.random() * 0.65, 2, 1);
           }
           // At high speed: an occasional big rooster-tail plume behind the car.
-          if (k === 0 && p.v > 35 && Math.random() < amount * 0.18 * rate) {
+          if (k === 0 && p.v > 35 && Math.random() < amount * 0.18 * rate * thin) {
             const d = this.w.clone().addScaledVector(this.side, -this.side.dot(this.w.clone().sub(g.position)) * 0.5);
             d.y += 0.4;
             const v = this.vel.clone().multiplyScalar(0.7);
@@ -288,7 +293,7 @@ export class TireFX {
             this.spawn(d, v, 0.9 + Math.random() * 0.5, 1.0 + Math.random() * 0.6, 2, 1);
           }
         } else if (sliding > 0.3 && p.v > 6) {
-          if (Math.random() < sliding * 0.7 * rate) {
+          if (Math.random() < sliding * 0.7 * rate * thin) {
             const v = this.vel.clone().multiplyScalar(0.25).addScaledVector(this.side, (k ? 1 : -1) * (0.3 + Math.random()));
             v.y = 0.3 + Math.random() * 0.4;
             this.spawn(this.w.clone().setY(this.w.y + 0.25), v, 1.1 + Math.random() * 0.9, 0.45 + Math.random() * 0.5, 0, 1);
@@ -310,7 +315,7 @@ export class TireFX {
             }
           }
         }
-        if (fx.mist > 0.3 && Math.random() < 0.7 * rate * fx.mist) {
+        if (fx.mist > 0.3 && Math.random() < 0.7 * rate * fx.mist * thin) {
           // The car tears through the mist: swirls pushed out to the sides behind it.
           this.w.set(0, 0.6, 2.4);
           g.localToWorld(this.w);

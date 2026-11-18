@@ -28,9 +28,6 @@ export class Sfx {
   private readonly boostGain: GainNode;
   private readonly boostFilter: BiquadFilterNode;
   private boostOn = false;
-  private sirenGain: GainNode | null = null;
-  private sirenOsc: OscillatorNode | null = null;
-  private sirenLfo: OscillatorNode | null = null;
   /** When false the engine + wind are silenced (menus). */
   engineOn = true;
 
@@ -124,32 +121,45 @@ export class Sfx {
     this.impact(0.25);
   }
 
-  /** Police siren (two-tone wail), 0 = off … 1 = right behind you. Created on first use. */
-  setSiren(level: number): void {
-    const ctx = this.ctx;
-    if (!this.sirenGain) {
-      if (level <= 0.001) return;
-      const t = ctx.currentTime;
-      this.sirenGain = ctx.createGain();
-      this.sirenGain.gain.value = 0;
-      const f = ctx.createBiquadFilter();
-      f.type = 'bandpass';
-      f.frequency.value = 1100;
-      f.Q.value = 0.8;
-      this.sirenOsc = ctx.createOscillator();
-      this.sirenOsc.type = 'square';
-      this.sirenOsc.frequency.value = 760;
-      this.sirenLfo = ctx.createOscillator();
-      this.sirenLfo.type = 'square';
-      this.sirenLfo.frequency.value = 1.6; // hi-lo
-      const depth = ctx.createGain();
-      depth.gain.value = 190;
-      this.sirenLfo.connect(depth).connect(this.sirenOsc.frequency);
-      this.sirenOsc.connect(f).connect(this.sirenGain).connect(this.envFilter);
-      this.sirenOsc.start(t);
-      this.sirenLfo.start(t);
-    }
-    this.sirenGain.gain.setTargetAtTime(Math.max(0, Math.min(1, level)) * 0.09, ctx.currentTime, 0.15);
+  /** A snake's hiss: a second of thin, breathy "sssss" that swells and trails off, with a dry rattle under it. */
+  hiss(): void {
+    const ctx = this.ctx, t = ctx.currentTime;
+    const n = noiseSource(ctx);
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 4200;
+    const peak = ctx.createBiquadFilter();
+    peak.type = 'peaking';
+    peak.frequency.value = 7200;
+    peak.Q.value = 1.5;
+    peak.gain.value = 9;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.5, t + 0.06);
+    g.gain.setValueAtTime(0.42, t + 0.55);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.25);
+    n.connect(hp).connect(peak).connect(g).connect(this.envFilter);
+    n.start(t, Math.random());
+    n.stop(t + 1.3);
+    // Rattle: fast clicks (noise gated at ~45 Hz).
+    const r = noiseSource(ctx);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 2600;
+    bp.Q.value = 2;
+    const gate = ctx.createGain();
+    gate.gain.value = 0;
+    const lfo = ctx.createOscillator();
+    lfo.type = 'square';
+    lfo.frequency.value = 45;
+    const depth = ctx.createGain();
+    depth.gain.setValueAtTime(0.0001, t);
+    depth.gain.linearRampToValueAtTime(0.16, t + 0.1);
+    depth.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
+    lfo.connect(depth).connect(gate.gain);
+    r.connect(bp).connect(gate).connect(this.envFilter);
+    r.start(t, Math.random()); lfo.start(t);
+    r.stop(t + 1.3); lfo.stop(t + 1.3);
   }
 
   /** Boost roar on / off (called every frame); the roar brightens with speed. */

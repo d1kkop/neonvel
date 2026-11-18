@@ -19,6 +19,8 @@ export interface Settings {
   laps: number;
   /** Laps picked per level in Quick Race (unset = the level's default: 2 top row, 3 below). */
   lapsByLevel: Record<string, number>;
+  /** Personal fastest lap per level in milliseconds (kept locally; the server has the shared boards). */
+  bestLaps: Record<string, number>;
   /** 'auto' = the level's own ambience, otherwise a fixed ambience kind (or 'none'). */
   ambience: string;
   /** 'auto' = level track, 'shuffle', or a fixed track id. */
@@ -27,7 +29,9 @@ export interface Settings {
   driveMode: 'grip' | 'drift';
   opponents: number;
   /** Quick Race game mode. */
-  mode: 'race' | 'highway' | 'heat';
+  mode: 'race' | 'highway';
+  /** Overall lighting / glow, 0.5 (toned down) .. 1 (as designed). */
+  lighting: number;
   /** VHS look (scanlines, tape wobble). */
   vhs: boolean;
   /** AI opponent strength. */
@@ -56,11 +60,13 @@ const DEFAULTS: Settings = {
   fog: {},
   laps: 3,
   lapsByLevel: {},
+  bestLaps: {},
   ambience: 'auto',
   music: 'auto',
   driveMode: 'grip',
   opponents: 3,
   mode: 'race',
+  lighting: 1,
   vhs: false, // optional (Options → VHS look)
   difficulty: 'normal',
   matchWait: 30,
@@ -81,7 +87,10 @@ export function loadSettings(): Settings {
         s.version = 2;
       }
       s.volume.ambience ??= DEFAULTS.volume.ambience;
+      // The Heat (police chase) mode was removed.
+      if ((s.mode as string) === 'heat') s.mode = 'race';
       s.fog ??= {};
+      s.bestLaps ??= {};
       // Fog used to be a weather of its own: turn it into clear + fog.
       for (const [id, w] of Object.entries(s.weather)) if (w === 'fog') { s.weather[id] = 'clear'; s.fog[id] = true; }
       // v3: ambience is just a quiet background layer.

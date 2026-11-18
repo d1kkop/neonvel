@@ -70,3 +70,53 @@ export function makeReverb(ctx: BaseAudioContext, seconds: number, decay: number
     return g;
   }
 }
+
+/**
+ * How far ahead of the audio clock the procedural music schedules its notes (seconds). The scheduler runs
+ * on the page's main thread, which the renderer can hold up for many frames in a row (slow frames, shader
+ * compiles, garbage collection); everything inside this window is already queued on the audio thread and
+ * plays on time regardless. (It used to be 120 ms: a few slow frames made the music stutter and drop out.)
+ */
+export const MUSIC_LOOKAHEAD = 0.9;
+
+/**
+ * Step sequencer clock for the procedural songs: calls `onStep(step, time, stepLength)` for every step, well
+ * ahead of the audio clock. If the page stalls for longer than the lookahead it skips whole steps, so the
+ * music stays on its beat grid (`origin` + n × step) and the beat clock keeps matching what you hear.
+ */
+export class StepClock {
+  step = 0;
+  nextTime: number;
+  /** AudioContext time of step 0. */
+  readonly origin: number;
+  private timer: number | null;
+
+  constructor(
+    private readonly ctx: BaseAudioContext,
+    private readonly stepLen: number,
+    private readonly onStep: (step: number, time: number, stepLen: number) => void,
+  ) {
+    this.nextTime = ctx.currentTime + 0.1;
+    this.origin = this.nextTime;
+    this.timer = window.setInterval(() => this.tick(), 25);
+  }
+
+  stop(): void {
+    if (this.timer !== null) window.clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  tick(): void {
+    const now = this.ctx.currentTime;
+    if (this.nextTime < now + 0.02) {
+      const missed = Math.ceil((now + 0.04 - this.nextTime) / this.stepLen);
+      this.nextTime += missed * this.stepLen;
+      this.step += missed;
+    }
+    while (this.nextTime < now + MUSIC_LOOKAHEAD) {
+      this.onStep(this.step, this.nextTime, this.stepLen);
+      this.nextTime += this.stepLen;
+      this.step++;
+    }
+  }
+}

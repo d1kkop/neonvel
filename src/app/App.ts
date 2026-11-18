@@ -8,7 +8,7 @@ import { World } from '../game/World';
 import { AI_DIFFICULTY } from '../game/CarPhysics';
 import { defaultLaps } from '../game/laps';
 import { preloadCarModels } from '../game/car/carModels';
-import { type GameMode, HeatMode, HighwayMode } from '../game/modes';
+import { type GameMode, HighwayMode } from '../game/modes';
 import { levelById } from '../levels';
 import type { LevelDef } from '../levels/types';
 import { NetClient, NetPlayer, ServerMsg } from '../net/NetClient';
@@ -88,6 +88,7 @@ export class App {
       findMatch: () => void this.findMatch(),
       cancelMatch: () => this.cancelMatch(),
       refreshLeaderboard: () => void this.refreshLeaderboard(),
+      lapBoard: (level) => this.store.lapBoard(level, this.settings.playerName),
       resume: () => this.resume(),
       restart: () => (this.online || this.lastWasOnline ? void this.findMatch(true) : this.startRace()),
       quitToMenu: () => this.toMenu(),
@@ -198,7 +199,14 @@ export class App {
       this.hud.minimap.setTrack(pts, w.track.width);
     }
     w.weather.onLightning = (delay) => this.audio.sfx?.thunder(delay, Math.max(0.4, 1 - delay / 3));
-    w.onLevelSound = (kind) => { if (kind === 'dolphin') this.audio.ambience?.dolphin(); };
+    w.onLevelSound = (kind) => {
+      if (kind === 'dolphin') this.audio.ambience?.dolphin();
+      else if (kind === 'meteor') { this.audio.sfx?.impact(1); this.audio.sfx?.thunder(0.05, 0.9); }
+      else if (kind === 'ufo') this.audio.sfx?.whoosh(0, 0.9, 1.1);
+      else if (kind === 'hiss') this.audio.sfx?.hiss();
+    };
+    // Only while you drive: the menu's attract camera and the free camera stay steady.
+    w.onShake = (amount) => { if (this.state === 'racing' && !this.freeCam) this.chase.shake(amount); };
     this.renderer.setScene(w.scene, this.camera);
     this.world = w;
     // The chase camera sits further back / higher for long vehicles (the 3 m tall bus: well above the roof).
@@ -242,8 +250,7 @@ export class App {
       return { x: c.car.group.position.x, z: c.car.group.position.z, color: this.carColor(c.car.group), player: c.isPlayer, gap };
     });
     for (const n of w.npcs) {
-      const police = n.kind === 'police';
-      cars.push({ x: n.car.group.position.x, z: n.car.group.position.z, color: police ? (Math.floor(performance.now() / 150) % 2 ? '#ff2040' : '#3070ff') : '#8a8a96', player: false, gap: n.phys.s - p.phys.s, minor: !police, noLabel: police });
+      cars.push({ x: n.car.group.position.x, z: n.car.group.position.z, color: '#8a8a96', player: false, gap: n.phys.s - p.phys.s, minor: true });
     }
     this.hud.minimap.draw(g.position.x, g.position.z, fx, fz, cars);
   }
@@ -264,7 +271,6 @@ export class App {
   private loadMenuWorld(level: LevelDef, title = false): void {
     this.onTitle = title;
     this.mode = null;
-    this.audio.sfx?.setSiren(0);
     const weather = title ? level.defaultWeather : this.raceWeather(level);
     this.menuWeather = `${weather}|${!title && this.raceFog(level)}`;
     const w = this.buildWorld(level, weather, 3);
@@ -298,7 +304,6 @@ export class App {
   private startRace(): void {
     this.onTitle = false;
     this.mode = null;
-    this.audio.sfx?.setSiren(0);
     window.clearTimeout(this.previewTimer);
     if (!this.isLevelOwned(this.settings.levelId)) {
       this.menu.toast('This level is locked — unlock it on the Quick Race screen.');
@@ -330,7 +335,7 @@ export class App {
       this.compiling = false;
       if (this.world !== w) return;
       this.laps = modeId === 'race' ? (this.settings.lapsByLevel?.[w.level.id] ?? defaultLaps(w.level.id)) : Infinity;
-      this.mode = modeId === 'highway' ? new HighwayMode() : modeId === 'heat' ? new HeatMode() : null;
+      this.mode = modeId === 'highway' ? new HighwayMode() : null;
       this.mode?.start(w);
       this.lastLap = 1;
       this.lapStart = 0;
@@ -477,8 +482,10 @@ export class App {
     const lap = Math.floor(Math.max(0, p.phys.s) / L) + 1;
     if (lap !== this.lastLap && racing) {
       if (lap > this.lastLap) {
-        this.bestLap = Math.min(this.bestLap, this.raceTime - this.lapStart);
+        const lapTime = this.raceTime - this.lapStart;
+        this.bestLap = Math.min(this.bestLap, lapTime);
         this.lapStart = this.raceTime;
+        if (!this.mode) this.recordLap(w.level.id, lapTime);
       }
       this.lastLap = lap;
       if (lap === this.laps) this.hud.message('FINAL LAP!');
@@ -491,11 +498,28 @@ export class App {
     }
   }
 
+  /**
+   * A lap was completed in a race (single lap, whichever lap of the race it was). A new personal best is kept
+   * locally and sent to the server's track board (needs a driver name).
+   */
+  private recordLap(levelId: string, seconds: number): void {
+    const ms = Math.round(seconds * 1000);
+    const prev = this.settings.bestLaps[levelId];
+    if (prev !== undefined && ms >= prev) return;
+    this.settings.bestLaps[levelId] = ms;
+    saveSettings(this.settings);
+    this.hud.beatPop(`BEST LAP ${formatTime(seconds)}`, true);
+    if (!this.settings.playerName) return;
+    void this.store.submitLap(this.settings.playerName, levelId, ms, this.settings.carId).then((r) => {
+      if (r?.improved && r.rank) this.menu.toast(`Track record board: you are #${r.rank} on ${LEVEL_NAMES[levelId] ?? levelId}`);
+    });
+  }
+
   // ------------------------------------------------------------ VHS look
 
   private vhsTime = 0;
 
-  /** Current game mode (Highway Rush / Heat), null in a normal race. */
+  /** Current game mode (Highway Rush), null in a normal race. */
   private mode: GameMode | null = null;
 
   private finishMode(): void {
@@ -503,7 +527,6 @@ export class App {
     this.state = 'finished';
     const r = m.result();
     this.audio.ui?.fanfare(r.won);
-    this.audio.sfx?.setSiren(0);
     this.hud.message(r.title, 2.5);
     const name = this.settings.playerName || 'YOU';
     window.setTimeout(() => {
@@ -566,7 +589,6 @@ export class App {
     if (this.mode && (this.state === 'racing' || this.state === 'countdown')) {
       this.mode.frame(dt, w);
       this.hud.setModeLines(this.mode.hud());
-      this.audio.sfx?.setSiren(this.paused ? 0 : this.mode.siren);
     } else this.hud.setModeLines(null);
     // The world and the HUD pulse to the music's beat.
     const bd = this.beatDistance();
@@ -897,6 +919,7 @@ export class App {
     this.audio.setVolume('sfx', v.sfx);
     this.audio.setVolume('ambience', v.ambience);
     this.applyQuality();
+    this.renderer.lighting = Math.min(1, Math.max(0.5, this.settings.lighting ?? 1));
     this.net.setUrl(this.settings.serverUrl);
     this.store.setServer(this.settings.serverUrl);
   }

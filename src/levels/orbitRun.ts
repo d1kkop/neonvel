@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Rng } from '../util/random';
 import { designs } from '../world/billboardArt';
 import { createAsteroids, createPlanet, Placement } from '../world/props/LevelProps';
+import { MeteorStrike, ShootingStars, Ufo } from '../world/props/SpaceEvents';
 import { AlienCyclist, FloatingRoadster, RocketFlyby } from '../world/props/SpaceVisitors';
 import type { LevelDef } from './types';
 
@@ -83,12 +84,33 @@ export const orbitRun: LevelDef = {
         scene.add(m);
       }
     }
-    // Visitors: a drifting red roadster with an astronaut, a rocket launch, and an alien on a flying bike.
-    const visitors = [new FloatingRoadster(track), new RocketFlyby(track), new AlienCyclist(track)];
+    // Visitors: the Roadster (a drifting red roadster with an astronaut), a rocket launch, an alien on a flying
+    // bike; shooting stars and burning meteors in the sky, a meteor that now and then hits the road ahead of
+    // you, and a flying saucer that tags along for a while before it shoots off.
+    const visitors = [
+      new FloatingRoadster(track), new RocketFlyby(track), new AlienCyclist(track),
+      new ShootingStars(track), new MeteorStrike(track, { sound: (k) => ctx.sound?.(k), shake: (a) => ctx.shake?.(a) }), new Ufo(track, { sound: (k) => ctx.sound?.(k) }),
+    ];
     for (const v of visitors) scene.add(v.group);
+    // The Roadster, the alien on his bike and the saucer fly beside the road, where the billboards stand: near a
+    // board they rise and pass over the top of it instead of through it (a smooth hop, 3 m clear).
+    const clearBoards = (p: THREE.Vector3, size: number) => {
+      for (const b of ctx.boards()) {
+        const reach = b.w / 2 + size + 6;
+        const d = Math.hypot(p.x - b.pos.x, p.z - b.pos.z);
+        if (d >= reach) continue;
+        const k = THREE.MathUtils.smoothstep(reach - d, 0, reach * 0.45);
+        p.y = Math.max(p.y, THREE.MathUtils.lerp(p.y, b.pos.y + b.h / 2 + size + 3, k));
+      }
+    };
     ctx.onUpdate((time, dt) => {
       const pl = ctx.player();
       for (const v of visitors) v.update(time, dt, pl);
+      clearBoards(visitors[0].group.position, 5);   // Roadster (with its arrow and name above it)
+      clearBoards(visitors[2].group.position, 2);   // alien cyclist
+      const craft = visitors[5].group.children[0], glow = visitors[5].group.children[1];
+      clearBoards(craft.position, 5);               // saucer
+      glow.position.copy(craft.position);
     });
     return {};
   },

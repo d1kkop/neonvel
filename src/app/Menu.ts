@@ -8,7 +8,7 @@ import { rankName } from '../net/elo';
 const RANK_TEXT = '<b>Rating</b> is your online skill score: everyone starts at 1000. In an online race you win points from every driver you finish ahead of and lose points to everyone who beats you — beating higher-rated drivers earns more. <b>Rank</b> is the title for your rating: Bronze (under 1100) · Silver 1100 · Gold 1250 · Platinum 1450 · Chrome 1700 · Neon Legend 2000+. Only Netplay races count; Quick Races against the AI do not change it.';
 import { CARS, carById, formatPrice, PAINTS } from '../game/car/catalog';
 import { levelItem, levelPrice } from '../game/products';
-import type { StoreMode } from '../net/Store';
+import type { LapBoard, StoreMode } from '../net/Store';
 import { GaragePreview } from './GaragePreview';
 import { controlsHtml } from './controlsHelp';
 import { defaultLaps } from '../game/laps';
@@ -23,6 +23,8 @@ export interface MenuHandlers {
   findMatch(): void;
   cancelMatch(): void;
   refreshLeaderboard(): void;
+  /** A track's fastest-lap board (null = server offline). */
+  lapBoard(level: string): Promise<LapBoard | null>;
   resume(): void;
   restart(): void;
   quitToMenu(): void;
@@ -62,6 +64,12 @@ function weatherLabel(level: LevelDef, w: WeatherName): string {
   if (level.precipitation === 'snow') return ({ clear: 'Clear', rain: 'Snow', fog: 'Fog', storm: 'Blizzard' } as const)[w];
   if (level.precipitation === 'bubbles') return ({ clear: 'Calm', rain: 'Bubbles', fog: 'Murky', storm: 'Currents' } as const)[w];
   return WEATHER_LABELS[w];
+}
+
+/** Lap time in milliseconds as m:ss.mmm. */
+function lapText(ms: number): string {
+  const m = Math.floor(ms / 60000);
+  return `${m}:${((ms - m * 60000) / 1000).toFixed(3).padStart(6, '0')}`;
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -157,21 +165,59 @@ export class Menu {
     el.querySelector('[data-act=options]')!.addEventListener('click', () => { this.h.sound('select'); this.show('options'); });
   }
 
+  /** Which board the leaderboard screen shows: 'rating' (online ranking) or a level id (fastest laps). */
+  private board = 'rating';
+
   private renderLeaderboard(): void {
     const el = this.screens.get('leaderboard')!;
+    const tab = this.board;
+    const tabs = `<div class="row lb-tabs">
+      <button class="chip ${tab === 'rating' ? 'on' : ''}" data-board="rating">Online rating</button>
+      ${LEVELS.map((l) => `<button class="chip ${tab === l.id ? 'on' : ''}" data-board="${l.id}">${esc(l.name)}</button>`).join('')}</div>`;
+    const level = LEVELS.find((l) => l.id === tab);
     el.innerHTML = `
       <div class="title">LEADERBOARD</div>
-      <div class="panel" style="max-width:720px">
-        <div class="row" style="justify-content:space-between">
+      <div class="panel" style="max-width:760px">
+        ${tabs}
+        ${level ? `
+        <div class="row" style="justify-content:space-between;margin-top:10px">
+          <span class="hud-small">FASTEST LAP · ${esc(level.name.toUpperCase())}</span><button class="chip" data-act="refresh">Refresh</button></div>
+        <div class="note" style="margin:6px 0 10px">Every driver's <b>fastest single lap</b> on this track, from any race (against the AI or online), whatever the number of laps. Your best lap is sent automatically once you have a driver name (Netplay screen).${this.s.bestLaps[level.id] ? ` Your best here: <b>${lapText(this.s.bestLaps[level.id])}</b>.` : ''}</div>
+        <div class="lb-scroll"><table class="lb"><thead><tr><th>#</th><th>DRIVER</th><th>LAP TIME</th><th>CAR</th></tr></thead>
+          <tbody data-laps><tr><td colspan="4">Loading…</td></tr></tbody></table></div>` : `
+        <div class="row" style="justify-content:space-between;margin-top:10px">
           <span class="hud-small">ONLINE RANKING · ${esc(this.s.playerName || 'no driver name yet')} · ${this.s.rating}</span><button class="chip" data-act="refresh">Refresh</button></div>
         <div class="note" style="margin:6px 0 10px">${RANK_TEXT}</div>
-        <table class="lb"><thead><tr><th>#</th><th>DRIVER</th><th>RATING</th><th>RANK</th><th>RACES</th></tr></thead>
-          <tbody data-lb><tr><td colspan="5">Loading…</td></tr></tbody></table>
+        <div class="lb-scroll"><table class="lb"><thead><tr><th>#</th><th>DRIVER</th><th>RATING</th><th>RANK</th><th>RACES</th></tr></thead>
+          <tbody data-lb><tr><td colspan="5">Loading…</td></tr></tbody></table></div>`}
         <div class="row" style="margin-top:16px"><button class="btn small" data-act="back">Back</button></div>
       </div>`;
-    el.querySelector('[data-act=refresh]')!.addEventListener('click', () => { this.h.sound('select'); this.h.refreshLeaderboard(); });
+    el.querySelectorAll<HTMLElement>('[data-board]').forEach((b) => b.addEventListener('click', () => {
+      this.board = b.dataset.board!;
+      this.h.sound('select');
+      this.renderLeaderboard();
+    }));
+    const load = () => (level ? void this.loadLapBoard(level.id) : this.h.refreshLeaderboard());
+    el.querySelector('[data-act=refresh]')!.addEventListener('click', () => { this.h.sound('select'); load(); });
     el.querySelector('[data-act=back]')!.addEventListener('click', () => this.back());
-    this.h.refreshLeaderboard();
+    load();
+  }
+
+  /** Fill the fastest-lap table: the top 50, then the player's own row if they are further down. */
+  private async loadLapBoard(levelId: string): Promise<void> {
+    const b = await this.h.lapBoard(levelId);
+    if (this.board !== levelId) return; // another tab was opened meanwhile
+    const tb = this.screens.get('leaderboard')!.querySelector('[data-laps]');
+    if (!tb) return;
+    const me = this.s.playerName.toLowerCase();
+    const carName = (id: string) => { const c = CARS.find((x) => x.id === id); return c ? esc(c.name) : ''; };
+    if (!b) { tb.innerHTML = '<tr><td colspan="4">Leaderboard offline — start the server ("npm run server").</td></tr>'; return; }
+    if (!b.top.length) { tb.innerHTML = '<tr><td colspan="4">No lap times yet — be the first: finish a lap on this track.</td></tr>'; return; }
+    let html = b.top.map((r, i) => `<tr class="${me && r.name.toLowerCase() === me ? 'me' : ''}"><td>${i + 1}</td><td>${esc(r.name)}</td><td>${lapText(r.ms)}</td><td>${carName(r.car)}</td></tr>`).join('');
+    if (b.me && b.me.rank > b.top.length) {
+      html += `<tr class="gap"><td colspan="4">· · ·</td></tr><tr class="me"><td>${b.me.rank}</td><td>${esc(this.s.playerName)}</td><td>${lapText(b.me.ms)}</td><td>of ${b.total}</td></tr>`;
+    }
+    tb.innerHTML = html;
   }
 
   private renderQuick(): void {
@@ -204,8 +250,8 @@ export class Menu {
           <button class="chip ${fogOn ? 'on' : ''}" data-fog="1">On</button>
           <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">Mist lying on the track — works with any weather.</span></div>` : ''}
         <div class="row"><span class="label">Mode</span>
-          ${([['race', 'Race'], ['highway', 'Highway Rush'], ['heat', 'Heat']] as const).map(([m, label]) => `<button class="chip ${m === (s.mode ?? 'race') ? 'on' : ''}" data-mode="${m}">${label}</button>`).join('')}
-          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${(s.mode ?? 'race') === 'race' ? 'Classic race against the AI.' : s.mode === 'highway' ? 'Open road with traffic: near misses score, checkpoints add time — beat the clock.' : 'Police chase: survive 150 s without getting boxed in. The heat keeps rising.'}</span></div>
+          ${([['race', 'Race'], ['highway', 'Highway Rush']] as const).map(([m, label]) => `<button class="chip ${m === (s.mode ?? 'race') ? 'on' : ''}" data-mode="${m}">${label}</button>`).join('')}
+          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${(s.mode ?? 'race') === 'race' ? 'Classic race against the AI.' : 'Open road with traffic: near misses score and fill your boost, checkpoints add time — beat the clock.'}</span></div>
         ${(s.mode ?? 'race') === 'race' ? '' : '<div style="display:none">'}
         <div class="row"><span class="label">Laps</span>
           ${[1, 2, 3, 5].map((n) => `<button class="chip ${n === laps ? 'on' : ''}" data-laps="${n}">${n}</button>`).join('')}</div>
@@ -478,6 +524,9 @@ export class Menu {
           <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${s.driveMode === 'drift'
             ? 'Steer hard + tap brake / SPACE at speed to slide; keep steering to hold the drift.'
             : 'Planted and precise. SPACE (handbrake) still kicks the tail out.'}</span></div>
+        <div class="row"><span class="label">Lighting</span>
+          <input type="range" min="0.5" max="1" step="0.05" value="${s.lighting ?? 1}" data-lighting>
+          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">Glow and brightness of the lights. Full (right) is how the game is meant to look; slide left if it is too much for you.</span></div>
         <div class="row"><span class="label">VHS look</span>
           <button class="chip ${s.vhs === true ? 'on' : ''}" data-vhs="1">On</button>
           <button class="chip ${s.vhs !== true ? 'on' : ''}" data-vhs="0">Off</button>
@@ -514,6 +563,11 @@ export class Menu {
     const closePop = () => { this.h.sound('back'); pop.hidden = true; clearInterval(timer); };
     el.querySelector('[data-act=close-controls]')!.addEventListener('click', closePop);
     pop.addEventListener('click', (e) => { if (e.target === pop) closePop(); });
+    el.querySelector<HTMLInputElement>('[data-lighting]')!.addEventListener('input', (e) => {
+      s.lighting = +(e.target as HTMLInputElement).value;
+      this.commit();
+      this.h.settingsChanged();
+    });
     el.querySelectorAll<HTMLInputElement>('[data-vol]').forEach((r) => r.addEventListener('input', () => {
       s.volume[r.dataset.vol as 'master' | 'music' | 'sfx' | 'ambience'] = +r.value;
       this.commit();

@@ -19,6 +19,8 @@ export const atmosphere = {
   uMistColor: { value: new THREE.Color('#80708a') },
   /** 0..1 flash on the music's harder kicks (set by World every frame). */
   uBeatHit: { value: 0 },
+  /** 0..1 pulse on every beat of the music (1 right on the beat, decaying; set by World every frame). */
+  uBeatPulse: { value: 0 },
 };
 
 export const ATMOS_PARS = /* glsl */ `
@@ -33,6 +35,7 @@ uniform float uCaustics;
 uniform float uMist;
 uniform vec3 uMistColor;
 uniform float uBeatHit;
+uniform float uBeatPulse;
 
 float causticLayer(vec2 uv, float t) {
   vec2 p = mod(uv * 6.28318, 6.28318) - 250.0;

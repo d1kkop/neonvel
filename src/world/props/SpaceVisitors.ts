@@ -5,7 +5,7 @@ import { LoopTrack, makeFrame } from '../../track/Track';
 
 /**
  * Orbit Run guests that show up near the player now and then:
- *  - a red roadster drifting through space with an astronaut at the wheel,
+ *  - the Roadster: a red roadster drifting through space with an astronaut at the wheel,
  *  - a two-stage rocket blasting across the sky,
  *  - a little alien pedalling a flying bike alongside you.
  */
@@ -112,24 +112,33 @@ function astronaut(): THREE.Group {
   return g;
 }
 
-/** Glowing text label (canvas) for a sprite. */
-function nameTag(text: string): THREE.CanvasTexture {
+/**
+ * Glowing text label (canvas) for a sprite. The canvas is sized to the measured text plus room for the glow
+ * and the italic slant (a fixed 512 px canvas cut long names off at both ends). Returns the texture and its
+ * width / height ratio for the sprite's scale.
+ */
+function nameTag(text: string): { map: THREE.CanvasTexture; aspect: number } {
+  const font = 'italic 900 72px Arial, sans-serif';
+  const pad = 40; // glow radius + slant overhang
   const c = document.createElement('canvas');
-  c.width = 512; c.height = 128;
-  const g = c.getContext('2d')!;
-  g.font = 'italic 900 72px Arial, sans-serif';
+  let g = c.getContext('2d')!;
+  g.font = font;
+  c.width = Math.ceil(g.measureText(text).width) + pad * 2;
+  c.height = 128;
+  g = c.getContext('2d')!; // resizing resets the context state
+  g.font = font;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   g.shadowColor = '#ff2bd6';
   g.shadowBlur = 18;
   g.fillStyle = '#ffffff';
-  g.fillText(text, 256, 66);
+  g.fillText(text, c.width / 2, 66);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  return t;
+  return { map: t, aspect: c.width / c.height };
 }
 
-/** A red open-top roadster tumbling slowly through space, astronaut at the wheel. */
+/** The Roadster: a red open-top roadster tumbling slowly through space, astronaut at the wheel. */
 export class FloatingRoadster extends Encounter {
   private readonly body = new THREE.Group();
   private readonly axis = new THREE.Vector3();
@@ -162,8 +171,9 @@ export class FloatingRoadster extends Encounter {
     this.group.add(this.body);
     // Bobbing neon arrow + name tag over the car (does not tumble with it).
     const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.7, 1.4, 4).rotateX(Math.PI), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd23a').multiplyScalar(2.2) }));
-    const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: nameTag('SPACE CADET'), transparent: true, depthWrite: false }));
-    tag.scale.set(6, 1.5, 1);
+    const label = nameTag('ROADSTER');
+    const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: label.map, transparent: true, depthWrite: false }));
+    tag.scale.set(1.5 * label.aspect, 1.5, 1);
     tag.position.y = 1.9;
     this.marker.add(arrow, tag);
     this.group.add(this.marker);

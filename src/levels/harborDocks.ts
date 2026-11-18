@@ -1,9 +1,9 @@
-import { makeFrame } from '../track/Track';
 import { Rng } from '../util/random';
 import { designs } from '../world/billboardArt';
 import { City } from '../world/City';
-import { createOcean, insideTrack } from '../world/coast/Coast';
-import { createContainers, createCranes, createShips, Placement } from '../world/props/LevelProps';
+import { createOcean } from '../world/coast/Coast';
+import { buildHarborYard } from '../world/props/HarborYard';
+import { createShips } from '../world/props/LevelProps';
 import { Terrain } from '../world/terrain/Terrain';
 import type { LevelDef } from './types';
 
@@ -54,46 +54,16 @@ export const harborDocks: LevelDef = {
     scene.add(terrain.mesh);
     scene.add(createOcean({ deep: '#03101e', shallow: '#0a2238', skyHorizon: '#3a2a30', level: 0, night: true }));
 
-    // Container stacks in rows on the quay.
-    const containers: Placement[] = [];
-    const s = track.samples;
-    const nearest = (x: number, z: number) => {
-      let b = Infinity;
-      for (let k = 0; k < s.length; k += 4) b = Math.min(b, Math.hypot(s[k].x - x, s[k].z - z));
-      return b;
-    };
-    for (let gx = -200; gx < 1150; gx += 16) {
-      for (let gz = -50; gz < 420; gz += 34) {
-        if (!insideTrack(track, gx, gz) || rng.chance(0.25)) continue;
-        if (nearest(gx, gz) < 24) continue;
-        const stack = rng.int(1, 4);
-        for (let k = 0; k < stack; k++) containers.push({ x: gx, y: 3 + k * 2.65, z: gz, yaw: 0 });
-        if (rng.chance(0.5)) for (let k = 0; k < stack; k++) containers.push({ x: gx, y: 3 + k * 2.65, z: gz + 2.6, yaw: 0 });
-      }
-    }
-    scene.add(createContainers(containers));
-
-    // Cranes and ships along the waterfront (outside the loop).
-    const frame = makeFrame();
-    const cranes: Placement[] = [];
-    const ships: Placement[] = [];
-    for (let d = 0; d < track.length; d += 70) {
-      track.frameAt(d, frame);
-      for (const side of [-1, 1]) {
-        const probe = side * 55;
-        const px = frame.position.x + frame.right.x * probe, pz = frame.position.z + frame.right.z * probe;
-        if (insideTrack(track, px, pz)) continue;
-        const yaw = Math.atan2(frame.right.x * side, frame.right.z * side);
-        if (rng.chance(0.6)) cranes.push({ x: frame.position.x + frame.right.x * side * 46, y: 3, z: frame.position.z + frame.right.z * side * 46, yaw });
-        if (rng.chance(0.3)) ships.push({ x: frame.position.x + frame.right.x * side * 110, y: 0, z: frame.position.z + frame.right.z * side * 110, yaw: yaw + Math.PI / 2 });
-      }
-    }
-    scene.add(createCranes(cranes));
-    scene.add(createShips(ships));
+    // The container terminal: stacks under floodlight masts, quay cranes unloading ships, yard cranes over the
+    // rows, conveyor belts and robot carriers (see HarborYard.ts).
+    const yard = buildHarborYard(track, rng, ctx.quality);
+    scene.add(yard.group);
+    scene.add(createShips(yard.ships));
+    ctx.onUpdate((time) => yard.update(time));
 
     // City skyline behind the docks.
     const city = new City(track, ctx.seed, { minDist: 650, margin: 1600 });
     scene.add(city.group);
-    return { searchlights: city.searchlightSpots.slice(0, 6) };
+    return { searchlights: city.searchlightSpots.slice(0, 6), noBoards: yard.noBoards };
   },
 };

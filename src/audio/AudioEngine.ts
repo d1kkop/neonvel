@@ -76,6 +76,11 @@ export class AudioEngine {
     if (!Ctx) return;
     const ctx = new Ctx();
     this.ctx = ctx;
+    // The browser can stop the context on its own (output device switched, audio service hiccup): start it
+    // again as soon as that happens while the page is visible.
+    ctx.onstatechange = () => {
+      if (ctx.state !== 'running' && ctx.state !== 'closed' && !document.hidden) void ctx.resume().catch(() => {});
+    };
 
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -6;

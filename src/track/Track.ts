@@ -212,24 +212,3 @@ export class LoopTrack implements Track {
     return idx;
   }
 }
-
-/** First level: an irregular circuit with a long straight, a hairpin and sweepers. */
-export function createSkywayTrack(): LoopTrack {
-  return new LoopTrack({
-    points: [
-      [0, 0], [420, -40], [760, 60], [880, 340], [760, 600], [520, 640],
-      [380, 820], [120, 900], [-180, 820], [-260, 600], [-120, 440], [-380, 300],
-      [-520, 120], [-360, -20],
-    ],
-    targetLength: 2800,
-    height: 150,
-    width: 18,
-    lanes: 4,
-    sections: [
-      { type: 'canopy', start: 380, end: 640 },
-      { type: 'tunnel', start: 1050, end: 1380 },
-      { type: 'canopy', start: 1900, end: 2080 },
-      { type: 'tunnel', start: 2420, end: 2560 },
-    ],
-  });
-}

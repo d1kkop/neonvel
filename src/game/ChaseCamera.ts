@@ -15,6 +15,14 @@ export class ChaseCamera {
   private readonly carFwd = new THREE.Vector3();
   private readonly lookDir = new THREE.Vector3();
   private readonly look = new THREE.Vector3();
+  /** Remaining shake strength (0..1), decaying. */
+  private shakeAmt = 0;
+  private shakeTime = 0;
+
+  /** Kick the camera (0..1): a short, decaying rattle (meteor impact nearby). */
+  shake(amount: number): void {
+    this.shakeAmt = Math.max(this.shakeAmt, Math.min(1, amount));
+  }
 
   constructor(private readonly camera: THREE.PerspectiveCamera) {}
 
@@ -38,6 +46,15 @@ export class ChaseCamera {
     this.look.copy(target.position).addScaledVector(this.lookDir, this.lookAhead);
     this.look.y += this.lookHeight;
     this.camera.lookAt(this.look);
+    if (this.shakeAmt > 0.002) {
+      // Two fast, unrelated wobbles per axis; dies away in about half a second.
+      this.shakeTime += dt;
+      const t = this.shakeTime, k = this.shakeAmt * 0.45;
+      this.camera.position.x += (Math.sin(t * 71) + Math.sin(t * 113 + 1.3)) * 0.5 * k;
+      this.camera.position.y += (Math.sin(t * 83 + 0.7) + Math.sin(t * 127)) * 0.5 * k;
+      this.camera.rotation.z += Math.sin(t * 97 + 2.1) * 0.012 * this.shakeAmt;
+      this.shakeAmt *= Math.exp(-dt * 6);
+    }
 
     const fov = 60 + speed01 * 14;
     if (Math.abs(this.camera.fov - fov) > 0.01) {

@@ -4,6 +4,15 @@
  */
 export type StoreMode = 'stripe' | 'test' | 'off' | 'offline';
 
+export interface LapBoard {
+  level: string;
+  /** Fastest first, at most 50. */
+  top: { name: string; ms: number; car: string }[];
+  /** The asking driver's own place and time (also when outside the top 50); null = no lap on this track yet. */
+  me: { rank: number; ms: number } | null;
+  total: number;
+}
+
 export class Store {
   constructor(private serverUrl: string) {}
 
@@ -29,6 +38,28 @@ export class Store {
     try {
       const r = await fetch(`${this.base}/leaderboard`, { signal: AbortSignal.timeout(2500) });
       return (await r.json()) as { name: string; rating: number; games: number }[];
+    } catch {
+      return null;
+    }
+  }
+
+  /** A track's fastest-lap board: the top 50 and where `name` stands. null = server offline. */
+  async lapBoard(level: string, name: string): Promise<LapBoard | null> {
+    try {
+      const r = await fetch(`${this.base}/laptimes?level=${encodeURIComponent(level)}&name=${encodeURIComponent(name)}`, { signal: AbortSignal.timeout(2500) });
+      return (await r.json()) as LapBoard;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Report a lap time (the server keeps it only if it is this driver's fastest on the track). */
+  async submitLap(name: string, level: string, ms: number, car: string): Promise<{ best?: number; improved?: boolean; rank?: number; error?: string } | null> {
+    try {
+      const r = await fetch(`${this.base}/laptime`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, level, ms, car }), signal: AbortSignal.timeout(4000),
+      });
+      return (await r.json()) as { best?: number; improved?: boolean; rank?: number; error?: string };
     } catch {
       return null;
     }

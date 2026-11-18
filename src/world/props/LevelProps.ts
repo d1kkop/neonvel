@@ -17,7 +17,7 @@ function propShader(frag: string, opts: { vertex?: string; uniforms?: Record<str
     vertexShader: /* glsl */ `
       attribute vec3 aColor;
       varying vec3 vColor; varying vec3 vLocal; varying vec3 vWorld; varying vec3 vNormalW; varying vec2 vUv;
-      uniform float uTime;
+      uniform float uTime, uBeatPulse, uBeatHit;
       void main() {
         vColor = aColor; vLocal = position; vUv = uv;
         vec3 p = position;
@@ -73,24 +73,39 @@ function scaledInstances(geo: THREE.BufferGeometry, mat: THREE.Material, list: {
 // ------------------------------------------------------------------ desert
 
 /** Flat-topped mesas: terraced ledges, vertical gullies and a talus foot; layered strata in the shader. */
+/** Mesa outline: how far the wall is pushed out (x 1 = the plain cone) at angle a (rad) and height y (0 foot .. 1 top). */
+function mesaBulge(a: number, y: number): number {
+  const sm = (lo: number, hi: number, x: number) => { const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo))); return t * t * (3 - 2 * t); };
+  // Silhouette lobes.
+  let k = 1 + Math.sin(a * 3 + y * 2) * 0.08 + Math.sin(a * 7 + 1.3) * 0.04 + Math.sin(a * 13 - y * 3) * 0.02;
+  // Terraces: harder layers stick out as ledges.
+  const s = y * 7 + Math.sin(a * 2 + 0.7) * 0.4;
+  const t = s - Math.floor(s);
+  k += 0.035 * sm(0.6, 0.92, t) - 0.02 * sm(0.92, 1.0, t);
+  // Vertical gullies cut by run-off, wandering a little with height.
+  k -= 0.06 * Math.pow(Math.max(0, Math.sin(a * 11 + Math.sin(y * 5 + a) * 0.7)), 6) * sm(0.05, 0.3, y);
+  k -= 0.03 * Math.pow(Math.max(0, Math.sin(a * 23 + 2.1 + y * 1.5)), 8);
+  // Talus slope at the foot.
+  k += 0.16 * Math.pow(1 - sm(0.0, 0.28, y), 2);
+  return k;
+}
+
+/**
+ * Distance from a mesa's centre to the edge of its flat top, in the world direction (dx, dz) (unit vector).
+ * For things that sit on the rim.
+ */
+export function mesaTopRadius(m: { r: number; yaw: number }, dx: number, dz: number): number {
+  // World direction -> the mesa's own frame (it is rotated by yaw about Y).
+  const lx = dx * Math.cos(m.yaw) - dz * Math.sin(m.yaw), lz = dx * Math.sin(m.yaw) + dz * Math.cos(m.yaw);
+  return 0.42 * 2 * m.r * mesaBulge(Math.atan2(lz, lx), 1);
+}
+
 export function createMesas(list: { x: number; y: number; z: number; r: number; h: number; yaw: number }[]): THREE.InstancedMesh {
   const geo = new THREE.CylinderGeometry(0.42, 0.5, 1, 96, 48).translate(0, 0.5, 0);
   const p = geo.getAttribute('position');
-  const sm = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-    const a = Math.atan2(z, x);
-    // Silhouette lobes.
-    let k = 1 + Math.sin(a * 3 + y * 2) * 0.08 + Math.sin(a * 7 + 1.3) * 0.04 + Math.sin(a * 13 - y * 3) * 0.02;
-    // Terraces: harder layers stick out as ledges.
-    const s = y * 7 + Math.sin(a * 2 + 0.7) * 0.4;
-    const t = s - Math.floor(s);
-    k += 0.035 * sm(0.6, 0.92, t) - 0.02 * sm(0.92, 1.0, t);
-    // Vertical gullies cut by run-off, wandering a little with height.
-    k -= 0.06 * Math.pow(Math.max(0, Math.sin(a * 11 + Math.sin(y * 5 + a) * 0.7)), 6) * sm(0.05, 0.3, y);
-    k -= 0.03 * Math.pow(Math.max(0, Math.sin(a * 23 + 2.1 + y * 1.5)), 8);
-    // Talus slope at the foot.
-    k += 0.16 * Math.pow(1 - sm(0.0, 0.28, y), 2);
+    const k = mesaBulge(Math.atan2(z, x), y);
     p.setX(i, x * k);
     p.setZ(i, z * k);
   }
@@ -365,101 +380,6 @@ export function createBoulders(list: Placement[]): THREE.InstancedMesh {
 
 // ------------------------------------------------------------------ harbor
 
-const CONTAINER_COLORS = ['#c0392b', '#1f6fb2', '#e67e22', '#27ae60', '#8e44ad', '#d4ac0d', '#7f8c8d', '#16a085'].map((c) => new THREE.Color(c));
-
-/** Shipping containers with corrugated walls. */
-export function createContainers(list: Placement[]): THREE.InstancedMesh {
-  const geo = withColors(new THREE.BoxGeometry(12, 2.6, 2.45).translate(0, 1.3, 0), CONTAINER_COLORS, list.length);
-  const mat = propShader(/* glsl */ `
-    float rc = vLocal.x * 3.0;
-    float rib = smoothstep(0.3, 0.5, abs(fract(rc) - 0.5));
-    rib = mix(rib, 0.45, smoothstep(0.25, 0.7, fwidth(rc))); // no shimmer at distance
-    col *= 0.8 + 0.25 * rib;
-    col *= 0.85 + 0.15 * vnoise(vWorld.xz * 2.0 + vWorld.y);
-  `);
-  const mesh = instanced(geo, mat, list);
-  return mesh;
-}
-
-/** Gantry cranes: four legs, a deck and a long boom, with a red warning light (emissive). */
-/** A beam (box) from point a to point b (cross bracing, truss diagonals, stays). */
-function beam(ax: number, ay: number, az: number, bx: number, by: number, bz: number, t: number): THREE.BufferGeometry {
-  const a = new THREE.Vector3(ax, ay, az), b = new THREE.Vector3(bx, by, bz);
-  const len = a.distanceTo(b);
-  const g = new THREE.BoxGeometry(t, len, t);
-  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
-  g.applyQuaternion(q);
-  const mid = a.add(b).multiplyScalar(0.5);
-  g.translate(mid.x, mid.y, mid.z);
-  return g.toNonIndexed();
-}
-
-/**
- * Ship-to-shore container cranes: a braced portal on four legs, a long truss boom reaching out over the water
- * (+Z), an A-frame with stay cables, a machinery house and a hanging spreader. At night: work lights along the
- * boom, floodlights under it and a blinking red aviation light on top.
- */
-export function createCranes(list: Placement[]): THREE.Group {
-  const H = 34; // portal beam height
-  const legs = [[-9, -7], [9, -7], [-9, 7], [9, 7]] as const;
-  const steel: THREE.BufferGeometry[] = [];
-  for (const [x, z] of legs) steel.push(new THREE.BoxGeometry(1.4, H, 1.4).translate(x, H / 2, z).toNonIndexed());
-  // Portal: top girders + cross bracing (X) on both sides and the ends.
-  steel.push(new THREE.BoxGeometry(20, 2.2, 1.6).translate(0, H, -7).toNonIndexed(), new THREE.BoxGeometry(20, 2.2, 1.6).translate(0, H, 7).toNonIndexed());
-  steel.push(new THREE.BoxGeometry(1.6, 2.2, 16).translate(-9, H, 0).toNonIndexed(), new THREE.BoxGeometry(1.6, 2.2, 16).translate(9, H, 0).toNonIndexed());
-  for (const x of [-9, 9]) {
-    steel.push(beam(x, 8, -7, x, H - 2, 7, 0.6), beam(x, 8, 7, x, H - 2, -7, 0.6));
-    steel.push(new THREE.BoxGeometry(0.8, 1.2, 14).translate(x, 8, 0).toNonIndexed());
-  }
-  // Boom: two chords with diagonals, from behind the portal (backreach) far out over the water.
-  const z0 = -26, z1 = 62, by = H + 6;
-  for (const x of [-1.6, 1.6]) {
-    steel.push(new THREE.BoxGeometry(0.9, 0.9, z1 - z0).translate(x, by, (z0 + z1) / 2).toNonIndexed());
-    steel.push(new THREE.BoxGeometry(0.7, 0.7, z1 - z0).translate(x, by - 3, (z0 + z1) / 2).toNonIndexed());
-    for (let z = z0; z < z1; z += 6) steel.push(beam(x, by - 3, z, x, by, z + 6, 0.35));
-  }
-  for (let z = z0; z <= z1; z += 12) steel.push(new THREE.BoxGeometry(3.6, 0.4, 0.4).translate(0, by, z).toNonIndexed());
-  // A-frame + stay cables to the boom.
-  steel.push(beam(-1.6, H, -6, 0, H + 26, 0, 1.0), beam(1.6, H, -6, 0, H + 26, 0, 1.0), beam(-1.6, H, 6, 0, H + 26, 0, 1.0), beam(1.6, H, 6, 0, H + 26, 0, 1.0));
-  for (const z of [22, 40, 58]) steel.push(beam(0, H + 26, 0, 0, by, z, 0.18));
-  steel.push(beam(0, H + 26, 0, 0, by, -24, 0.18));
-  // Machinery house on the backreach, trolley + hoist ropes + spreader over the quay edge.
-  steel.push(new THREE.BoxGeometry(6, 5, 9).translate(0, by + 2.5, -20).toNonIndexed());
-  steel.push(new THREE.BoxGeometry(4.2, 2, 4).translate(0, by - 4, 18).toNonIndexed());
-  for (const x of [-1.4, 1.4]) steel.push(new THREE.BoxGeometry(0.12, 18, 0.12).translate(x, by - 14, 18).toNonIndexed());
-  steel.push(new THREE.BoxGeometry(3, 0.8, 12.5).translate(0, by - 23, 18).toNonIndexed());
-  const g = new THREE.Group();
-  g.add(instanced(mergeGeometries(steel), std('#e2a210', { roughness: 0.55, metalness: 0.45, emissive: '#3a2400', emissiveIntensity: 0.6 }), list));
-  // Work lights along the boom underside + floodlights (bright cells) + a cabin with lit windows.
-  const lights: THREE.BufferGeometry[] = [];
-  for (let z = z0 + 3; z < z1; z += 5) lights.push(new THREE.BoxGeometry(0.5, 0.25, 0.5).translate(0, by - 3.6, z).toNonIndexed());
-  for (const [x, z] of legs) lights.push(new THREE.BoxGeometry(0.9, 0.4, 0.9).translate(x, H - 1.6, z).toNonIndexed());
-  lights.push(new THREE.BoxGeometry(2.4, 1, 0.1).translate(0, by - 4.2, 15.95).toNonIndexed());
-  g.add(instanced(mergeGeometries(lights), applyAtmosphere(new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffe2a8').multiplyScalar(4) })), list));
-  // Aviation lights: blink in sync (shader time on a shared material).
-  const lamp = new THREE.SphereGeometry(0.7, 24, 16).translate(0, H + 27, 0).toNonIndexed();
-  const tip = new THREE.SphereGeometry(0.5, 24, 16).translate(0, by + 0.8, z1).toNonIndexed();
-  const blink = new THREE.ShaderMaterial({
-    uniforms: { ...atmosphere },
-    vertexShader: 'varying vec3 vW; void main() { vec4 w = modelMatrix * instanceMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
-    fragmentShader: `${ATMOS_PARS}
-      varying vec3 vW;
-      void main() { float on = step(0.5, fract(uTime * 0.7 + vW.x * 0.001)); gl_FragColor = vec4(applyAtmos(vec3(1.0, 0.08, 0.06) * (0.4 + 5.0 * on), vW), 1.0); }`,
-  });
-  g.add(instanced(mergeGeometries([lamp, tip]), blink, list));
-  // Soft light cones from the boom floodlights onto the quay.
-  const cone = new THREE.ConeGeometry(9, by - 4, 64, 1, true).translate(0, (by - 4) / 2, 0).toNonIndexed();
-  cone.translate(0, 0, 8);
-  const coneMat = new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    uniforms: { uTop: { value: by - 4 } },
-    vertexShader: 'varying float vH; void main() { vH = position.y; gl_Position = projectionMatrix * viewMatrix * modelMatrix * instanceMatrix * vec4(position, 1.0); }',
-    fragmentShader: 'uniform float uTop; varying float vH; void main() { float k = smoothstep(0.0, uTop, vH); gl_FragColor = vec4(vec3(1.0, 0.85, 0.6) * 0.05 * k, 1.0); }',
-  });
-  g.add(instanced(cone, coneMat, list));
-  return g;
-}
-
 /** Cargo ships: hull + superstructure with lit windows. */
 export function createShips(list: Placement[]): THREE.Group {
   const g = new THREE.Group();
@@ -506,8 +426,10 @@ export function createFloatingShapes(list: { x: number; y: number; z: number; sc
       vec3 v = normalize(cameraPosition - vWorld);
       float rim = pow(clamp(1.0 - abs(dot(n, v)), 0.0, 1.0), 2.5);
       col = vec3(0.01, 0.0, 0.03);
-      emissive = vColor * (rim * 3.0 + 0.15);
+      emissive = vColor * (rim * 3.0 + 0.15) * (1.0 + 0.7 * uBeatPulse + 0.8 * uBeatHit);
     `, { vertex: /* glsl */ `
+      // Every shape swells on the beat (each by its own amount, 12-30 %) and jumps further on the hard hits.
+      p *= 1.0 + (0.12 + 0.18 * fract(phase * 0.618)) * uBeatPulse + 0.22 * uBeatHit;
       float a = uTime * 0.3 + phase;
       mat3 r = mat3(cos(a), 0.0, sin(a), 0.0, 1.0, 0.0, -sin(a), 0.0, cos(a));
       mat3 r2 = mat3(1.0, 0.0, 0.0, 0.0, cos(a * 0.7), -sin(a * 0.7), 0.0, sin(a * 0.7), cos(a * 0.7));

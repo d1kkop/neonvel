@@ -262,6 +262,7 @@ export class CirclingSharks {
   private readonly nose = new THREE.Vector3();
 
   constructor(private readonly paths: { centre: THREE.Vector3; radius: number; speed: number; phase: number; scale: number }[]) {
+    this.group.name = 'circling-sharks';
     const geo = sharkGeometry();
     for (const p of paths) {
       const s = new Shark(geo, p.scale);

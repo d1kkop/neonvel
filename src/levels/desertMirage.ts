@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { makeFrame } from '../track/Track';
 import { Rng } from '../util/random';
 import { designs } from '../world/billboardArt';
-import { createBoulders, createMesas, createSaguaros, createSmallCacti } from '../world/props/LevelProps';
+import { BirdFlock, createScorpions, PerchedEagles, PoleSnakes, type SnakePole, SoaringEagles } from '../world/props/DesertLife';
+import { ROAD_STYLE } from '../world/Road';
+import { createBoulders, createMesas, createSaguaros, createSmallCacti, mesaTopRadius } from '../world/props/LevelProps';
 import { fbm2, Terrain } from '../world/terrain/Terrain';
 import type { LevelDef } from './types';
 
@@ -38,7 +40,7 @@ export const desertMirage: LevelDef = {
   },
   weathers: ['clear', 'rain', 'storm'],
   defaultWeather: 'clear',
-  billboards: designs('overdrive', 'driveFast', 'miami2084', 'summer86', 'coconutTan', 'turboCola', 'neonNights', 'synthFm', 'tropicNights', 'miamiHeat'),
+  billboards: designs('duskTillDawn', 'overdrive', 'driveFast', 'miami2084', 'summer86', 'coconutTan', 'turboCola', 'neonNights', 'synthFm', 'tropicNights', 'miamiHeat'),
   ambience: 'desert',
   music: 'turbo-chase',
   build(ctx) {
@@ -55,7 +57,7 @@ export const desertMirage: LevelDef = {
         return ry - 0.6 + dunes + mountains;
       },
       palette: {
-        low: '#c8743a', mid: '#a8502e', high: '#2a0a3a', steep: '#7a3a2a', midAt: 20, highAt: 90, lines: { color: '#ff2bd6', spacing: 24, strength: 1.4, fromHeight: 30, beat: 1 },
+        low: '#c8743a', mid: '#a8502e', high: '#2a0a3a', steep: '#7a3a2a', midAt: 20, highAt: 90, lines: { color: '#ff2bd6', spacing: 24, strength: 1.4, fromHeight: 30, beat: 1, pulse: 1 },
         sand: { pale: '#e8a868', dark: '#9a4a2a', ripple: 1 }, ground: 'desert',
       },
     });
@@ -145,6 +147,72 @@ export const desertMirage: LevelDef = {
       }
     }
     scene.add(createBoulders(boulders));
+
+    // --- Wildlife. Scorpions on the sand beside the road: one at a time, a good 300 m apart, so you never see
+    // more than one. Some scuttle round in a small circle, the rest stand their ground waving their claws.
+    const scorpions: { x: number; y: number; z: number; yaw: number; scale: number; walk: number }[] = [];
+    for (let d = 140; d < track.length - 100; d += 300 + rng.range(0, 60)) {
+      if (track.sectionAt(d, 20)) continue;
+      const c = spot(d, 4, 10);
+      scorpions.push({ x: c.x, y: terrain.heightAt(c.x, c.z) + 0.02, z: c.z, yaw: rng.range(0, 6.28), scale: rng.range(2.6, 3.4), walk: rng.chance(0.5) ? rng.range(1.2, 2.2) : 0 });
+    }
+    scene.add(createScorpions(scorpions));
+
+    // Rattlesnakes: three of them round the lap, each coiled round a street-lamp post (the posts stand every
+    // 40 m on the barrier, right-hand ones on the 40 m marks, left-hand ones in between).
+    const snakePoles: SnakePole[] = [];
+    for (let k = 0; k < 3; k++) {
+      const side = rng.chance(0.5) ? 1 : -1;
+      const sp = ROAD_STYLE.lightSpacing;
+      let d = Math.round(((k + 0.55) * track.length) / 3 / sp) * sp + (side < 0 ? sp / 2 : 0);
+      for (let tries = 0; tries < 8 && track.sectionAt(d, 45); tries++) d += sp;
+      if (track.sectionAt(d, 45)) continue;
+      // Its post, and the next post on the other side of the road (20 m further on) that it can leap to.
+      const post = (dd: number, sd: number) => {
+        track.frameAt(dd, frame);
+        const lat = sd * (track.width / 2 + ROAD_STYLE.wallThickness * 0.5);
+        return { x: frame.position.x + frame.right.x * lat, y: frame.position.y + ROAD_STYLE.wallHeight, z: frame.position.z + frame.right.z * lat, s: dd };
+      };
+      snakePoles.push({ ...post(d, side), other: track.sectionAt(d + sp / 2, 8) ? undefined : post(d + sp / 2, -side) });
+    }
+    const snakes = new PoleSnakes(snakePoles, track.length, () => ctx.sound?.('hiss'));
+    scene.add(snakes.group);
+
+    // Eagles: perched right on the edge of four mesa tops, on the side facing the road, heads following the
+    // player. The mesas picked are the nearest ones whose top you can still see from the road (looking up at
+    // no more than about 35 degrees: close under a tall wall the top is hidden). Two more eagles soar in
+    // circles above; a flock of black birds wheels around wherever you are.
+    const nearRoad = mesas.map((m) => {
+      let best = Infinity, bx = 0, bz = 0;
+      for (let k = 0; k < track.samples.length; k += 4) {
+        if (track.sectionAt(k * track.sampleStep, 15)) continue; // seen from open road, not from inside a tunnel
+        const dd = Math.hypot(track.samples[k].x - m.x, track.samples[k].z - m.z);
+        if (dd < best) { best = dd; bx = track.samples[k].x; bz = track.samples[k].z; }
+      }
+      const gap = best - m.r;
+      return { m, gap, steep: m.h / Math.max(gap, 1), dx: (bx - m.x) / best, dz: (bz - m.z) / best, roadS: track.nearestSample(bx, bz) * track.sampleStep };
+    }).sort((a, b) => (a.steep > 0.7 ? 1e4 + a.steep : a.gap) - (b.steep > 0.7 ? 1e4 + b.steep : b.gap));
+    const perches = nearRoad.slice(0, 4).map(({ m, dx, dz, roadS }) => {
+      const r = mesaTopRadius(m, dx, dz) - 1.2;
+      return { x: m.x + dx * r, y: m.y + m.h - 0.05, z: m.z + dz * r, yaw: Math.atan2(dx, dz), scale: 6.5, roadS };
+    });
+    const roadFrame = makeFrame();
+    const eagles = new PerchedEagles(perches, track.length, (d, out) => out.copy(track.frameAt(d, roadFrame).position));
+    scene.add(eagles.group);
+    const soaring = new SoaringEagles(nearRoad.slice(1, 3).map(({ m }) => ({ x: m.x, y: m.y + m.h + 38, z: m.z })));
+    scene.add(soaring.group);
+    const flock = new BirdFlock(ctx.quality === 'low' ? 26 : 44);
+    scene.add(flock.mesh);
+    const playerPos = new THREE.Vector3();
+    ctx.onUpdate((time, dt) => {
+      const pl = ctx.player();
+      track.frameAt(pl.s, frame);
+      playerPos.copy(frame.position).addScaledVector(frame.right, pl.x);
+      flock.update(time, dt, playerPos);
+      soaring.update(time);
+      eagles.update(time, dt, playerPos, pl.s, pl.v);
+      snakes.update(dt, playerPos, pl.s, pl.v);
+    });
     return {};
   },
 };

@@ -28,10 +28,15 @@ export class Billboards {
 
   private readonly designCount: number;
 
+  /** Where every board hangs: centre, width and height (for things that fly around and must not pass through). */
+  readonly spots: { pos: THREE.Vector3; w: number; h: number }[] = [];
+
   /** Per-frame animation (underwater boards bob in the current); undefined for static neon boards. */
   update?: (time: number) => void;
 
-  constructor(track: LoopTrack, roofSpots: RoofSpot[], faceSpots: FaceSpot[], seed: number, designList: BillboardDesign[], private readonly style: 'neon' | 'underwater' = 'neon') {
+  constructor(track: LoopTrack, roofSpots: RoofSpot[], faceSpots: FaceSpot[], seed: number, designList: BillboardDesign[], private readonly style: 'neon' | 'underwater' = 'neon',
+    /** Stretches of roadside (track metres) where no board may stand; side -1 / 1, or 0 for both sides. */
+    keepOut: { d0: number; d1: number; side: number }[] = []) {
     const rng = new Rng(seed ^ 0xb111b0a7);
     this.designCount = Math.max(1, Math.min(designList.length, ATLAS_COLS * ATLAS_ROWS));
     const key = designList.map((d) => d.name).join("|");
@@ -56,10 +61,18 @@ export class Billboards {
     // Roadside boards on poles, alternating sides, angled toward oncoming traffic.
     const spacing = 230;
     const count = Math.floor(track.length / spacing);
+    const blocked = (d: number, side: number) => !!track.sectionAt(d, 30) || keepOut.some((k) => (k.side === 0 || k.side === side) && d > k.d0 && d < k.d1);
     for (let i = 0; i < count; i++) {
-      const side = i % 2 === 0 ? 1 : -1;
-      if (track.sectionAt(i * spacing + 60, 30)) continue;
-      track.frameAt(i * spacing + 60, frame);
+      let side = i % 2 === 0 ? 1 : -1;
+      let d = i * spacing + 60;
+      // Something else stands here (a crane, a bridge, a service lane): try the other side, then further along.
+      let found = false;
+      for (const off of [0, 30, -30, 60, -60, 90, -90]) {
+        for (const sd of [side, -side]) if (!found && !blocked(d + off, sd)) { d += off; side = sd; found = true; }
+        if (found) break;
+      }
+      if (!found) continue;
+      track.frameAt(d, frame);
       const lat = side * (hw + 8);
       const pos = frame.position.clone().addScaledVector(frame.right, lat);
       pos.y += 4;
@@ -83,6 +96,7 @@ export class Billboards {
       placements.push({ pos: f.pos, normal: f.normal, w: f.w, h: f.h, poleH: 0 });
     }
 
+    for (const pl of placements) this.spots.push({ pos: pl.pos.clone(), w: pl.w, h: pl.h });
     if (this.style === 'underwater') this.buildUnderwater(placements, rng);
     else this.build(placements, rng);
     if (fresh) void this.loadCustomImages();

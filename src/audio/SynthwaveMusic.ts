@@ -1,4 +1,4 @@
-import { env, makeReverb, midiToHz, noiseSource } from './dsp';
+import { env, makeReverb, midiToHz, noiseSource, StepClock } from './dsp';
 import { ANTHEMS, AnthemPlayer } from './AnthemMusic';
 
 /** Procedural tracks for the playlist: the anthems first, then the classic loop songs. */
@@ -303,19 +303,16 @@ function beatOffset(buffer: AudioBuffer, bpm: number): number {
 }
 
 /**
- * Procedural synthwave song player (lookahead scheduler on the AudioContext clock):
+ * Procedural synthwave song player (StepClock: notes are queued ~0.9 s ahead on the AudioContext clock):
  * bass, gated pad, lead arpeggio, kick / snare / hats — all driven by a SongDef.
  */
 class SongPlayer {
-  private origin = 0;
   get bpm(): number { return this.song.bpm; }
-  beatAt(now: number): number { return ((now - this.origin) * this.song.bpm) / 60; }
+  beatAt(now: number): number { return ((now - this.clock.origin) * this.song.bpm) / 60; }
   private readonly bus: GainNode;
   private readonly delaySend: GainNode;
   private readonly reverbSend: GainNode;
-  private timer: number | null = null;
-  private step = 0;
-  private nextTime = 0;
+  private readonly clock: StepClock;
 
   constructor(private readonly ctx: AudioContext, out: AudioNode, private readonly song: SongDef) {
     this.bus = ctx.createGain();
@@ -339,28 +336,15 @@ class SongPlayer {
     const t = ctx.currentTime;
     this.bus.gain.setValueAtTime(0, t);
     this.bus.gain.linearRampToValueAtTime(0.85, t + 1.5);
-    this.nextTime = t + 0.1;
-    this.origin = this.nextTime;
-    this.timer = window.setInterval(() => this.schedule(), 25);
+    this.clock = new StepClock(ctx, 60 / song.bpm / 4, (step, time, len) => this.playStep(step, time, len));
   }
 
   stop(): void {
-    if (this.timer !== null) window.clearInterval(this.timer);
-    this.timer = null;
+    this.clock.stop();
     const t = this.ctx.currentTime;
     this.bus.gain.cancelScheduledValues(t);
     this.bus.gain.setTargetAtTime(0, t, 0.4);
     window.setTimeout(() => this.bus.disconnect(), 3000);
-  }
-
-  private schedule(): void {
-    const sixteenth = 60 / this.song.bpm / 4;
-    if (this.nextTime < this.ctx.currentTime - 0.2) this.nextTime = this.ctx.currentTime + 0.05;
-    while (this.nextTime < this.ctx.currentTime + 0.12) {
-      this.playStep(this.step, this.nextTime, sixteenth);
-      this.nextTime += sixteenth;
-      this.step++;
-    }
   }
 
   private playStep(step: number, t: number, len: number): void {

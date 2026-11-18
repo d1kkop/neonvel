@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ATMOS_PARS, atmosphere, NOISE_GLSL } from '../../render/atmosphere';
 import { LoopTrack } from '../../track/Track';
 import { insideTrack } from '../coast/Coast';
+import { MAST_LIGHT_GLSL } from '../harborLights';
 
 export interface TerrainPalette {
   low: string;
@@ -13,7 +14,13 @@ export interface TerrainPalette {
   midAt: number;
   highAt: number;
   /** Optional glowing contour lines (synthwave wireframe look). */
-  lines?: { color: string; spacing: number; strength: number; fromHeight?: number; /** Extra glow on the music's hard hits (0 = none). */ beat?: number };
+  lines?: {
+    color: string; spacing: number; strength: number; fromHeight?: number;
+    /** Extra glow on the music's hard hits (0 = none). */
+    beat?: number;
+    /** Glow on every beat of the music (0 = none, 1 = the grid pumps with the beat). */
+    pulse?: number;
+  };
   /**
    * Wind-rippled sand below `midAt`: per-pixel ripple normals, colour patches, crest/trough tint and
    * gentle sheen. `pale` / `dark` are the patch colours mixed into `low`.
@@ -132,6 +139,7 @@ export class Terrain {
         uLineStrength: { value: P.lines?.strength ?? 0 },
         uLineFrom: { value: P.lines?.fromHeight ?? 2 },
         uLineBeat: { value: P.lines?.beat ?? 0 },
+        uLinePulse: { value: P.lines?.pulse ?? 0 },
         uSand: { value: P.sand ? 1 : 0 },
         uSandPale: { value: new THREE.Color(P.sand?.pale ?? '#ffffff') },
         uSandDark: { value: new THREE.Color(P.sand?.dark ?? '#000000') },
@@ -150,11 +158,12 @@ export class Terrain {
         }`,
       fragmentShader: /* glsl */ `
         uniform vec3 uLow, uMid, uHigh, uSteep, uLineColor, uSandPale, uSandDark;
-        uniform float uMidAt, uHighAt, uLineSpacing, uLineStrength, uLineFrom, uLineBeat, uSand, uRipple, uSnow, uSparkle, uGround;
+        uniform float uMidAt, uHighAt, uLineSpacing, uLineStrength, uLineFrom, uLineBeat, uLinePulse, uSand, uRipple, uSnow, uSparkle, uGround;
         uniform vec3 uSnowShadow;
         varying vec3 vWorld; varying vec3 vNormal;
         ${ATMOS_PARS}
         ${NOISE_GLSL}
+        ${MAST_LIGHT_GLSL}
         // Shared helpers (any ground style may use them).
         // Fade for a detail of frequency f (cycles per metre) given the pixel footprint (metres): no shimmer far away.
         float lod(float foot, float f) { return 1.0 - smoothstep(0.15, 0.5, foot * f); }
@@ -339,6 +348,10 @@ export class Terrain {
           }
           float diff = max(dot(n, L), 0.0);
           vec3 lit = col * (0.4 + 0.8 * diff);
+          if (uGround > 1.5 && uGround < 2.5) {
+            // Harbor quay: pools of warm light under the floodlight masts, glinting on the wet ground.
+            lit += col * mastLight(vWorld, n) * 0.9 + MAST_COLOR * mastSpec(vWorld, n, V, 60.0) * (0.04 + 0.5 * puddle);
+          }
           if (uSnow > 0.0) {
             // Snow: cold blue sky light in the shadows instead of grey, a soft sheen, and glints up close.
             float sm = max(snowMask, 1.0 - steepK);
@@ -365,7 +378,8 @@ export class Terrain {
           }
           if (uLineStrength > 0.0) {
             // Wireframe-ish grid: contour lines + a world-space grid. Thicker and brighter on hard hits.
-            float hit = uBeatHit * uLineBeat;
+            // Every beat pumps the grid; the harder kicks (accents, drops) still stand out on top.
+            float hit = max(uBeatHit * uLineBeat, uBeatPulse * uLinePulse * 0.75);
             vec2 g = vWorld.xz / uLineSpacing;
             vec2 fw = max(fwidth(g), vec2(1e-4));
             vec2 dd = abs(fract(g - 0.5) - 0.5) / (fw * (1.0 + hit * 1.5));
