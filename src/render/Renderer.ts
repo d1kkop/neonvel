@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { detectGpu } from './gpuTier';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
@@ -35,7 +36,7 @@ export class Renderer {
     container.appendChild(this.webgl.domElement);
 
     const size = this.webgl.getDrawingBufferSize(new THREE.Vector2());
-    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: isMobile ? 0 : 4 });
+    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: isMobile || detectGpu().tier === 'low' ? 0 : 4 }); // no MSAA on phones / weak GPUs
     this.composer = new EffectComposer(this.webgl, rt);
     this.renderPass = new RenderPass(scene, camera);
     this.composer.addPass(this.renderPass);
@@ -147,35 +148,88 @@ export class Renderer {
    * for that than for the screen (no tone mapping, linear output) — so the compile must target that buffer,
    * or the first real frame compiles everything a second time, synchronously.
    */
-  precompile(scene: THREE.Scene, camera: THREE.Camera): Promise<unknown> {
+  async precompile(scene: THREE.Scene, camera: THREE.Camera, budgetMs = 25): Promise<unknown> {
+    // In small portions, one object per material at a time, yielding between portions: compiling a whole
+    // level in one go blocks the page (and the music scheduling) for seconds on a first visit / on phones.
+    const seen = new Set<string>();
+    const todo: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      if (!m) return;
+      const mats = Array.isArray(m) ? m : [m];
+      const kind = `${(o as THREE.InstancedMesh).isInstancedMesh ? 'i' : ''}${(o as THREE.Points).isPoints ? 'p' : ''}${(o as THREE.Line).isLine ? 'l' : ''}${(o as THREE.Sprite).isSprite ? 's' : ''}`;
+      const key = mats.map((x) => x.uuid).join(',') + kind;
+      if (seen.has(key)) return;
+      seen.add(key);
+      todo.push(o);
+    });
     const prev = this.webgl.getRenderTarget();
+    let t0 = performance.now();
+    for (const o of todo) {
+      this.webgl.setRenderTarget(this.composer.readBuffer);
+      try { this.webgl.compile(o, camera, scene); } catch { /* compiled lazily then */ }
+      this.webgl.setRenderTarget(prev);
+      if (performance.now() - t0 > budgetMs) {
+        await new Promise((r) => setTimeout(r, 0));
+        t0 = performance.now();
+      }
+    }
+    // Then wait for the (parallel) compiles to finish.
     this.webgl.setRenderTarget(this.composer.readBuffer);
     try {
-      return this.webgl.compileAsync(scene, camera); // programs are set up synchronously; the promise only waits
+      return await this.webgl.compileAsync(scene, camera);
     } finally {
       this.webgl.setRenderTarget(prev);
     }
   }
 
-  private readonly maxRatio: number;
+  private maxRatio: number;
+  private minRatio = 1;
+
+  /** Range the dynamic resolution may move in (weak GPUs may drop below 1x). */
+  setRatioRange(min: number, max: number): void {
+    this.minRatio = min;
+    this.maxRatio = max;
+  }
   private slowFor = 0;
   private fastFor = 0;
   private avgMs = 16;
+  /** A resolution that was too slow (frame rate dropped) is not tried again until this time (performance.now ms). */
+  private failedRatio = Infinity;
+  private failedUntil = 0;
+  /** Lowest frame rate the dynamic resolution accepts (phones: 30, sharper picture; desktop: ~42). */
+  private minFps = 42;
+
+  setMinFps(fps: number): void {
+    this.minFps = fps;
+  }
 
   /**
    * Dynamic resolution (call once per frame with the real frame time): when the game stays under ~42 fps the
-   * render resolution steps down (never below 1x), and steps back up when there is clear headroom again.
+   * render resolution steps down (to the quality's minimum), and steps back up when there is clear headroom again.
    * Steps are rare (resizing the buffers costs a frame), so it settles instead of flapping.
    */
   adaptResolution(dtMs: number): void {
     if (dtMs > 250) return; // tab switch / loading hitch
     this.avgMs += (dtMs - this.avgMs) * 0.05;
     const ratio = this.webgl.getPixelRatio();
-    this.slowFor = this.avgMs > 24 ? this.slowFor + dtMs : 0;
-    this.fastFor = this.avgMs < 13 ? this.fastFor + dtMs : 0;
+    // Below the minimum frame rate: lower the resolution. Clearly above it: raise it (gap = no flapping).
+    const slowMs = 1000 / this.minFps, fastMs = this.minFps <= 30 ? 1000 / 37 : 18;
+    this.slowFor = this.avgMs > slowMs ? this.slowFor + dtMs : 0;
+    // Steady at the screen's refresh (60 Hz = 16.7 ms, or faster): there is room to sharpen the picture.
+    this.fastFor = this.avgMs < fastMs ? this.fastFor + dtMs : 0;
+    const now = performance.now();
+    if (now > this.failedUntil) this.failedRatio = Infinity;
+    const step = (r: number) => (r > 1 ? 0.25 : 0.125);
     let next = ratio;
-    if (this.slowFor > 2000 && ratio > 1) next = Math.max(1, ratio - 0.25);
-    else if (this.fastFor > 6000 && ratio < this.maxRatio) next = Math.min(this.maxRatio, ratio + 0.25);
+    if (this.slowFor > 2000 && ratio > this.minRatio) {
+      next = Math.max(this.minRatio, ratio - step(ratio - 0.01));
+      this.failedRatio = ratio; // too slow here: stay below it for a while (no flapping up and down)
+      this.failedUntil = now + 60000;
+    } else if (this.fastFor > 4000 && ratio < this.maxRatio) {
+      const up = Math.min(this.maxRatio, ratio + step(ratio));
+      if (up < this.failedRatio - 0.01) next = up;
+    }
     if (next !== ratio) {
       this.slowFor = this.fastFor = 0;
       this.avgMs = 17;

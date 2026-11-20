@@ -40,7 +40,7 @@ export class Sfx {
     this.envFilter.type = 'lowpass';
     this.envFilter.frequency.value = ENV_PARAMS.open.lowpass;
     this.envFilter.connect(this.out);
-    const reverb = makeReverb(ctx, 2.4, 2.5);
+    const reverb = makeReverb(ctx, 1.8, 2.5);
     this.reverbSend = ctx.createGain();
     this.reverbSend.gain.value = ENV_PARAMS.open.wet;
     this.envFilter.connect(this.reverbSend);
@@ -121,45 +121,94 @@ export class Sfx {
     this.impact(0.25);
   }
 
-  /** A snake's hiss: a second of thin, breathy "sssss" that swells and trails off, with a dry rattle under it. */
+  private rattleBuf: AudioBuffer | null = null;
+
+  /**
+   * A rattlesnake's rattle as recorded sound: a stream of dry clicks (~50 a second, never perfectly regular),
+   * each a sharp knock that rings briefly high up, louder and quieter as the tail shakes. Built once.
+   */
+  private rattle(): AudioBuffer {
+    if (this.rattleBuf) return this.rattleBuf;
+    const sr = this.ctx.sampleRate, len = Math.round(sr * 1.5);
+    const buf = this.ctx.createBuffer(1, len, sr);
+    const d = buf.getChannelData(0);
+    let t = 0.01, k = 0;
+    while (t < 1.45) {
+      const at = Math.round(t * sr);
+      const amp = (0.55 + 0.45 * Math.random()) * (0.75 + 0.25 * Math.sin(k * 0.37));
+      const f = 4200 + Math.random() * 2600, decay = 0.0012 + Math.random() * 0.0008;
+      for (let i = 0; i < sr * 0.008 && at + i < len; i++) {
+        const tt = i / sr;
+        d[at + i] += amp * (Math.sin(2 * Math.PI * f * tt) * Math.exp(-tt / decay) * 0.8 + (Math.random() * 2 - 1) * Math.exp(-tt / 0.0006) * 0.6);
+      }
+      t += 1 / (46 + Math.random() * 12);
+      k++;
+    }
+    // Fade in and out so it starts and ends naturally.
+    for (let i = 0; i < len; i++) d[i] *= Math.min(1, i / (sr * 0.06)) * Math.min(1, (len - i) / (sr * 0.25));
+    this.rattleBuf = buf;
+    return buf;
+  }
+
+  /**
+   * A snake's hiss: one forced exhale. Breathy noise shaped into a broad band around 5-6 kHz that drifts a
+   * little, rising fast, holding with an uneven flutter (air through a mouth is never steady) and dying away,
+   * with the rattle under it, slightly off to one side.
+   */
   hiss(): void {
     const ctx = this.ctx, t = ctx.currentTime;
+    const dur = 1.15 + Math.random() * 0.3;
     const n = noiseSource(ctx);
     const hp = ctx.createBiquadFilter();
     hp.type = 'highpass';
-    hp.frequency.value = 4200;
-    const peak = ctx.createBiquadFilter();
-    peak.type = 'peaking';
-    peak.frequency.value = 7200;
-    peak.Q.value = 1.5;
-    peak.gain.value = 9;
+    hp.frequency.value = 2200;
+    hp.Q.value = 0.5;
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.Q.value = 0.9;
+    band.frequency.setValueAtTime(5000 + Math.random() * 600, t);
+    band.frequency.linearRampToValueAtTime(6200 + Math.random() * 900, t + dur);
+    const air = ctx.createBiquadFilter();
+    air.type = 'peaking';
+    air.frequency.value = 9000;
+    air.Q.value = 0.7;
+    air.gain.value = 4;
+    const top = ctx.createBiquadFilter();
+    top.type = 'lowpass';
+    top.frequency.value = 11000;
+    // The breath: a quick rise, an uneven hold (random-walk flutter), a long fade.
+    const env = new Float32Array(96);
+    let w = 0;
+    for (let i = 0; i < env.length; i++) {
+      const x = i / (env.length - 1);
+      w += (Math.random() - 0.5) * 0.18 - w * 0.25;
+      const shape = Math.min(1, x / 0.07) * (x < 0.55 ? 1 : Math.pow(1 - (x - 0.55) / 0.45, 1.6));
+      env[i] = Math.max(0.0001, shape * (0.85 + w) * 0.55);
+    }
+    env[env.length - 1] = 0.0001;
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.5, t + 0.06);
-    g.gain.setValueAtTime(0.42, t + 0.55);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.25);
-    n.connect(hp).connect(peak).connect(g).connect(this.envFilter);
+    g.gain.value = 0;
+    g.gain.setValueCurveAtTime(env, t, dur);
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = (Math.random() < 0.5 ? -1 : 1) * (0.25 + Math.random() * 0.3);
+    n.connect(hp).connect(band).connect(air).connect(top).connect(g).connect(pan).connect(this.envFilter);
+    // A little of the unfiltered breath too (the hiss is not a pure band).
+    const breath = ctx.createGain();
+    breath.gain.value = 0.18;
+    hp.connect(breath).connect(g);
     n.start(t, Math.random());
-    n.stop(t + 1.3);
-    // Rattle: fast clicks (noise gated at ~45 Hz).
-    const r = noiseSource(ctx);
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.value = 2600;
-    bp.Q.value = 2;
-    const gate = ctx.createGain();
-    gate.gain.value = 0;
-    const lfo = ctx.createOscillator();
-    lfo.type = 'square';
-    lfo.frequency.value = 45;
-    const depth = ctx.createGain();
-    depth.gain.setValueAtTime(0.0001, t);
-    depth.gain.linearRampToValueAtTime(0.16, t + 0.1);
-    depth.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
-    lfo.connect(depth).connect(gate.gain);
-    r.connect(bp).connect(gate).connect(this.envFilter);
-    r.start(t, Math.random()); lfo.start(t);
-    r.stop(t + 1.3); lfo.stop(t + 1.3);
+    n.stop(t + dur + 0.05);
+    // The rattle, a touch quieter, starting just before the hiss.
+    const r = ctx.createBufferSource();
+    r.buffer = this.rattle();
+    r.playbackRate.value = 0.92 + Math.random() * 0.16;
+    const rg = ctx.createGain();
+    rg.gain.value = 0.2;
+    const rbp = ctx.createBiquadFilter();
+    rbp.type = 'highpass';
+    rbp.frequency.value = 1800;
+    r.connect(rbp).connect(rg).connect(pan);
+    r.start(Math.max(ctx.currentTime, t - 0.05));
   }
 
   /** Boost roar on / off (called every frame); the roar brightens with speed. */

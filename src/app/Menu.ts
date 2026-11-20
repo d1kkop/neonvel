@@ -7,7 +7,11 @@ import { rankName } from '../net/elo';
 /** Shown on the Netplay and Leaderboard screens. */
 const RANK_TEXT = '<b>Rating</b> is your online skill score: everyone starts at 1000. In an online race you win points from every driver you finish ahead of and lose points to everyone who beats you — beating higher-rated drivers earns more. <b>Rank</b> is the title for your rating: Bronze (under 1100) · Silver 1100 · Gold 1250 · Platinum 1450 · Chrome 1700 · Neon Legend 2000+. Only Netplay races count; Quick Races against the AI do not change it.';
 import { CARS, carById, formatPrice, PAINTS } from '../game/car/catalog';
-import { levelItem, levelPrice } from '../game/products';
+import { UNLOCK_ALL, levelItem, levelPrice } from '../game/products';
+import { detectGpu } from '../render/gpuTier';
+
+/** Phone / tablet (touch controls shown). */
+const TOUCH = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 1;
 import type { LapBoard, StoreMode } from '../net/Store';
 import { GaragePreview } from './GaragePreview';
 import { controlsHtml } from './controlsHelp';
@@ -25,6 +29,11 @@ export interface MenuHandlers {
   refreshLeaderboard(): void;
   /** A track's fastest-lap board (null = server offline). */
   lapBoard(level: string): Promise<LapBoard | null>;
+  signIn(provider: 'google' | 'discord' | 'dev', devName?: string): void;
+  signOut(): void;
+  /** Change the display name; returns an error message or null. */
+  rename(name: string): Promise<string | null>;
+  providers(): Promise<{ google: boolean; discord: boolean; dev: boolean } | null>;
   resume(): void;
   restart(): void;
   quitToMenu(): void;
@@ -182,11 +191,11 @@ export class Menu {
         ${level ? `
         <div class="row" style="justify-content:space-between;margin-top:10px">
           <span class="hud-small">FASTEST LAP · ${esc(level.name.toUpperCase())}</span><button class="chip" data-act="refresh">Refresh</button></div>
-        <div class="note" style="margin:6px 0 10px">Every driver's <b>fastest single lap</b> on this track, from any race (against the AI or online), whatever the number of laps. Your best lap is sent automatically once you have a driver name (Netplay screen).${this.s.bestLaps[level.id] ? ` Your best here: <b>${lapText(this.s.bestLaps[level.id])}</b>.` : ''}</div>
+        <div class="note" style="margin:6px 0 10px">Every driver's <b>fastest single lap</b> on this track, from any race (against the AI or online), whatever the number of laps. Your lap time counts as shown in the race, once the server has checked it was possible (race signed in: Netplay screen).${this.s.bestLaps[level.id] ? ` Your best here: <b>${lapText(this.s.bestLaps[level.id])}</b>.` : ''}</div>
         <div class="lb-scroll"><table class="lb"><thead><tr><th>#</th><th>DRIVER</th><th>LAP TIME</th><th>CAR</th></tr></thead>
           <tbody data-laps><tr><td colspan="4">Loading…</td></tr></tbody></table></div>` : `
         <div class="row" style="justify-content:space-between;margin-top:10px">
-          <span class="hud-small">ONLINE RANKING · ${esc(this.s.playerName || 'no driver name yet')} · ${this.s.rating}</span><button class="chip" data-act="refresh">Refresh</button></div>
+          <span class="hud-small">ONLINE RANKING · ${esc(this.s.authToken ? this.s.playerName : 'not signed in')} · ${this.s.rating}</span><button class="chip" data-act="refresh">Refresh</button></div>
         <div class="note" style="margin:6px 0 10px">${RANK_TEXT}</div>
         <div class="lb-scroll"><table class="lb"><thead><tr><th>#</th><th>DRIVER</th><th>RATING</th><th>RANK</th><th>RACES</th></tr></thead>
           <tbody data-lb><tr><td colspan="5">Loading…</td></tr></tbody></table></div>`}
@@ -228,7 +237,7 @@ export class Menu {
     const weather = weather0 === 'fog' ? 'clear' : weather0;
     const fogOn = s.fog?.[level.id] ?? weather0 === 'fog';
     const canFog = false; // fog was removed (it never looked right)
-    const levelOwned = (id: string) => levelPrice(id) === 0 || s.ownedCars.includes(levelItem(id));
+    const levelOwned = (id: string) => UNLOCK_ALL || levelPrice(id) === 0 || s.ownedCars.includes(levelItem(id));
     // Level cards: a sequence of in-game shots (public/levels/<id>/0..4.webp) that plays while the card is hovered
     // or selected; the colour gradient shows until the pictures have loaded.
     const shots = (id: string) => `<div class="shots">${[0, 1, 2, 3, 4].map((n) =>
@@ -334,7 +343,7 @@ export class Menu {
   private storeMode: StoreMode = 'offline';
 
   private owns(id: string): boolean {
-    return carById(id).price === 0 || this.s.ownedCars.includes(id);
+    return UNLOCK_ALL || carById(id).price === 0 || this.s.ownedCars.includes(id);
   }
 
   renderGarage(mode?: StoreMode): void {
@@ -424,8 +433,7 @@ export class Menu {
     el.innerHTML = `
       <div class="title">NETPLAY</div>
       <div class="panel" style="max-width:720px">
-        <div class="row"><span class="label">Driver name</span>
-          <input type="text" maxlength="16" value="${esc(s.playerName)}" placeholder="Enter a name" data-name></div>
+        <div data-account></div>
         <div class="rating"><div><div class="hud-small">RATING</div><div class="big" data-rating>${s.rating}</div></div>
           <div><div class="hud-small">RANK</div><div class="hud-big" data-rank>${rankName(s.rating)}</div></div>
           <div><div class="hud-small">RACES</div><div class="hud-big" data-games>${s.games}</div></div></div>
@@ -444,12 +452,9 @@ export class Menu {
           <tbody data-lb><tr><td colspan="5">Loading…</td></tr></tbody></table>
         <div class="row" style="margin-top:16px"><button class="btn small" data-act="back">Back</button></div>
       </div>`;
-    const name = el.querySelector<HTMLInputElement>('[data-name]')!;
-    name.addEventListener('change', () => { s.playerName = name.value.trim().slice(0, 16); this.commit(); });
+    this.renderAccount();
     el.querySelector('[data-act=find]')!.addEventListener('click', () => {
-      s.playerName = name.value.trim().slice(0, 16);
-      this.commit();
-      if (!s.playerName) { this.setNetStatus('Enter a driver name first.'); name.focus(); return; }
+      if (!s.authToken) { this.setNetStatus('Sign in with Google or Discord first.'); return; }
       this.h.sound('select');
       this.h.findMatch();
     });
@@ -462,6 +467,58 @@ export class Menu {
     el.querySelector('[data-act=refresh]')!.addEventListener('click', () => { this.h.sound('select'); this.h.refreshLeaderboard(); });
     el.querySelector('[data-act=back]')!.addEventListener('click', () => { this.h.cancelMatch(); this.back(); });
     this.h.refreshLeaderboard();
+  }
+
+  /** Sign-in state changed: redraw the account block (Netplay screen) if it is showing. */
+  refreshAccount(): void {
+    this.renderAccount();
+  }
+
+  /** Account block: sign-in buttons, or your driver name (editable) and a sign-out button. */
+  private renderAccount(): void {
+    for (const screen of (['netplay', 'options'] as const)) {
+      const box = this.screens.get(screen)?.querySelector<HTMLElement>('[data-account]');
+      if (box) this.renderAccountInto(box);
+    }
+  }
+
+  private renderAccountInto(box: HTMLElement): void {
+    const s = this.s;
+    if (s.authToken) {
+      box.innerHTML = `<div class="row"><span class="label">Driver name</span>
+          <input type="text" maxlength="16" value="${esc(s.playerName)}" data-name>
+          <button class="chip" data-act="signout">Sign out</button></div>
+        <div class="note" data-namemsg>Signed in. Your rating, purchases and track records belong to this account.</div>`;
+      const name = box.querySelector<HTMLInputElement>('[data-name]')!;
+      name.addEventListener('change', async () => {
+        const err = await this.h.rename(name.value.trim());
+        box.querySelector('[data-namemsg]')!.textContent = err ?? 'Name saved.';
+        if (err) name.value = s.playerName;
+      });
+      box.querySelector('[data-act=signout]')!.addEventListener('click', () => { this.h.sound('back'); this.h.signOut(); });
+      return;
+    }
+    box.innerHTML = `<div class="row"><span class="label">Account</span><span class="note" data-signin>Checking sign-in options…</span></div>
+      <div class="note">Sign in to race online, buy cars and levels, and get on the track-record boards. Quick races work without an account.</div>`;
+    void this.h.providers().then((p) => {
+      const slot = box.querySelector<HTMLElement>('[data-signin]');
+      if (!slot) return;
+      if (!p) { slot.textContent = 'Game server offline.'; return; }
+      const btn = (k: string, label: string) => `<button class="btn small signin ${k}" data-provider="${k}">${label}</button>`;
+      // Google and Discord are always shown; until their app keys are on the server, clicking one explains that.
+      slot.outerHTML = `<span style="display:flex;gap:8px;flex-wrap:wrap">${btn('google', 'Sign in with Google')}${btn('discord', 'Sign in with Discord')}${p.dev ? `<input type="text" maxlength="16" placeholder="test name" data-devname style="width:110px">${btn('dev', 'Dev sign-in')}` : ''}</span><span class="note" data-signmsg></span>`;
+      box.querySelectorAll<HTMLElement>('[data-provider]').forEach((b) => b.addEventListener('click', () => {
+        const k = b.dataset.provider as 'google' | 'discord' | 'dev';
+        if ((k === 'google' || k === 'discord') && !p[k]) {
+          this.h.sound('back');
+          box.querySelector('[data-signmsg]')!.textContent = `${k === 'google' ? 'Google' : 'Discord'} sign-in is not switched on for this server yet (its app keys still have to be added).`;
+          return;
+        }
+        this.h.sound('select');
+        const dev = box.querySelector<HTMLInputElement>('[data-devname]')?.value.trim() || 'Tester';
+        this.h.signIn(b.dataset.provider as 'google' | 'discord' | 'dev', dev);
+      }));
+    });
   }
 
   setNetStatus(text: string, searching = false): void {
@@ -498,6 +555,7 @@ export class Menu {
     el.innerHTML = `
       <div class="title">OPTIONS</div>
       <div class="panel" style="max-width:720px">
+        <div data-account></div>
         ${(['master', 'music', 'sfx', 'ambience'] as const).map((k) => `
           <div class="row"><span class="label">${k === 'sfx' ? 'Effects' : k}</span>
           <input type="range" min="0" max="1" step="0.05" value="${s.volume[k]}" data-vol="${k}"></div>`).join('')}
@@ -527,6 +585,10 @@ export class Menu {
         <div class="row"><span class="label">Lighting</span>
           <input type="range" min="0.5" max="1" step="0.05" value="${s.lighting ?? 1}" data-lighting>
           <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">Glow and brightness of the lights. Full (right) is how the game is meant to look; slide left if it is too much for you.</span></div>
+        <div class="row"><span class="label">Beat lights</span>
+          <button class="chip ${(s.beatSides ?? 1) === 1 ? 'on' : ''}" data-beatsides="1">One side</button>
+          <button class="chip ${s.beatSides === 2 ? 'on' : ''}" data-beatsides="2">Both sides</button>
+          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">Which neon strips along the road pulse to the music.</span></div>
         <div class="row"><span class="label">VHS look</span>
           <button class="chip ${s.vhs === true ? 'on' : ''}" data-vhs="1">On</button>
           <button class="chip ${s.vhs !== true ? 'on' : ''}" data-vhs="0">Off</button>
@@ -534,8 +596,14 @@ export class Menu {
         <div class="row"><span class="label">AI level</span>
           ${(['easy', 'normal', 'hard', 'impossible'] as const).map((d) => `<button class="chip ${d === (s.difficulty ?? 'normal') ? 'on' : ''}" data-diff="${d}">${d}</button>`).join('')}</div>
         <div class="row"><span class="label">Graphics</span>
-          ${(['low', 'medium', 'high'] as const).map((q) => `<button class="chip ${q === s.quality ? 'on' : ''}" data-q="${q}">${q}</button>`).join('')}</div>
-        <div class="row"><span class="label">Server</span><input type="text" value="${esc(s.serverUrl)}" data-server></div>
+          <button class="chip ${s.qualityAuto !== false ? 'on' : ''}" data-q="auto">Auto</button>
+          ${(['low', 'medium', 'high'] as const).map((q) => `<button class="chip ${s.qualityAuto === false && q === s.quality ? 'on' : ''}" data-q="${q}">${q}</button>`).join('')}
+          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${s.qualityAuto !== false ? `Auto picked <b>${detectGpu().tier}</b> (${esc(detectGpu().reason)}).` : `Detected: ${esc(detectGpu().reason)} → ${detectGpu().tier}.`}</span></div>
+        ${TOUCH ? `<div class="row"><span class="label">Touch</span>
+          ${([['buttons', '◀ ▶ Buttons'], ['stick', 'Stick'], ['tilt', 'Tilt']] as const).map(([k, l]) => `<button class="chip ${(s.touchControls ?? 'buttons') === k ? 'on' : ''}" data-touch="${k}">${l}</button>`).join('')}
+          <button class="chip ${s.autoGas !== false ? 'on' : ''}" data-autogas>Auto gas</button>
+          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${(s.touchControls ?? 'buttons') === 'tilt' ? 'Steer by tilting the phone like a wheel.' : (s.touchControls ?? 'buttons') === 'stick' ? 'Steer with the stick on the left.' : 'Steer with the arrow buttons on the left.'} ${s.autoGas !== false ? 'Gas is always on; hold BRAKE to slow down.' : 'Hold GAS to accelerate.'}</span></div>` : ''}
+
         <div class="row" style="margin-top:16px;justify-content:space-between">
           <button class="btn small" data-act="back">Back</button>
           <button class="chip" data-act="controls">Controls…</button></div>
@@ -547,6 +615,7 @@ export class Menu {
           <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn small" data-act="close-controls">Close</button></div>
         </div>
       </div>`;
+    this.renderAccount();
     const pop = el.querySelector<HTMLElement>('[data-controls]')!;
     // The layout follows what is plugged in (keyboard, Xbox or PlayStation pad), refreshed while the popup is open.
     const list = el.querySelector<HTMLElement>('[data-controls-list]')!;
@@ -563,6 +632,10 @@ export class Menu {
     const closePop = () => { this.h.sound('back'); pop.hidden = true; clearInterval(timer); };
     el.querySelector('[data-act=close-controls]')!.addEventListener('click', closePop);
     pop.addEventListener('click', (e) => { if (e.target === pop) closePop(); });
+    el.querySelectorAll<HTMLElement>('[data-beatsides]').forEach((c) => c.addEventListener('click', () => {
+      s.beatSides = c.dataset.beatsides === '2' ? 2 : 1;
+      this.commit(); this.h.sound('select'); this.h.settingsChanged(); this.renderOptions();
+    }));
     el.querySelector<HTMLInputElement>('[data-lighting]')!.addEventListener('input', (e) => {
       s.lighting = +(e.target as HTMLInputElement).value;
       this.commit();
@@ -594,12 +667,27 @@ export class Menu {
       s.difficulty = c.dataset.diff as Settings['difficulty'];
       this.commit(); this.h.sound('select'); this.renderOptions();
     }));
-    el.querySelectorAll<HTMLElement>('[data-q]').forEach((c) => c.addEventListener('click', () => {
-      s.quality = c.dataset.q as Settings['quality'];
+    el.querySelectorAll<HTMLElement>('[data-touch]').forEach((c) => c.addEventListener('click', async () => {
+      const mode = c.dataset.touch as NonNullable<Settings['touchControls']>;
+      // iPhone / iPad: motion sensors need permission, asked from this tap.
+      const DOE = window.DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
+      if (mode === 'tilt' && DOE?.requestPermission) {
+        const ok = await DOE.requestPermission().catch(() => 'denied');
+        if (ok !== 'granted') { this.toast('Tilt needs motion access — allow it in the browser to steer by tilting.'); return; }
+      }
+      s.touchControls = mode;
       this.commit(); this.h.sound('select'); this.h.settingsChanged(); this.renderOptions();
     }));
-    const srv = el.querySelector<HTMLInputElement>('[data-server]')!;
-    srv.addEventListener('change', () => { s.serverUrl = srv.value.trim(); this.commit(); });
+    el.querySelector('[data-autogas]')?.addEventListener('click', () => {
+      s.autoGas = s.autoGas === false;
+      this.commit(); this.h.sound('select'); this.h.settingsChanged(); this.renderOptions();
+    });
+    el.querySelectorAll<HTMLElement>('[data-q]').forEach((c) => c.addEventListener('click', () => {
+      s.qualityAuto = c.dataset.q === 'auto';
+      s.quality = c.dataset.q === 'auto' ? detectGpu().tier : c.dataset.q as Settings['quality'];
+      this.commit(); this.h.sound('select'); this.h.settingsChanged(); this.renderOptions();
+    }));
+
     el.querySelector('[data-act=back]')!.addEventListener('click', () => this.back());
   }
 

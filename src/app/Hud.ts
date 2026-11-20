@@ -28,8 +28,15 @@ export class Hud {
   /** Touch boost button held. */
   boostHeld = false;
   private msgTimer = 0;
-  /** Touch stick output (null when not touching). */
+  /** Touch controls output (null on devices without touch). */
   touch: InputState | null = null;
+  /** Touch scheme: on-screen ◀ ▶ buttons, a steering stick, or tilting the phone; autoGas = throttle unless braking. */
+  private touchMode: 'buttons' | 'stick' | 'tilt' = 'buttons';
+  private autoGas = true;
+  private readonly held = new Map<number, string>(); // pointer id -> button key
+  private stickX = 0;
+  private tiltX = 0;
+  private readonly isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 1;
   onPause?: () => void;
 
   constructor(parent: HTMLElement) {
@@ -49,7 +56,9 @@ export class Hud {
       <button class="boost-btn" data-boostbtn>BOOST</button>
       <div class="countdown" data-count></div>
       <div class="hud-msg" data-msg></div>
+      <div class="tc-steer"><button class="tc-btn tc-left" data-k="left">◀</button><button class="tc-btn tc-right" data-k="right">▶</button></div>
       <div class="stick" data-stick><div class="knob"></div></div>
+      <div class="tc-pedals"><button class="tc-btn tc-drift" data-k="drift">DRIFT</button><button class="tc-btn tc-brake" data-k="brake">BRAKE</button><button class="tc-btn tc-gas" data-k="gas">GAS</button></div>
       <button class="btn small pause-btn" data-pause>II</button>`;
     parent.appendChild(this.el);
     const q = (s: string) => this.el.querySelector<HTMLElement>(s)!;
@@ -82,6 +91,66 @@ export class Hud {
     }
     q('[data-pause]').addEventListener('click', () => this.onPause?.());
     this.setupStick(q('[data-stick]'));
+    this.setupButtons();
+    window.addEventListener('deviceorientation', (e) => this.onTilt(e));
+    this.setTouchMode('buttons', true);
+  }
+
+  /** Pick the touch scheme (Options). */
+  setTouchMode(mode: 'buttons' | 'stick' | 'tilt', autoGas: boolean): void {
+    this.touchMode = mode;
+    this.autoGas = autoGas;
+    this.el.classList.remove('tc-buttons', 'tc-stick', 'tc-tilt');
+    this.el.classList.add(`tc-${mode}`);
+    this.el.classList.toggle('autogas', autoGas);
+    this.recompute();
+  }
+
+  /** Multi-touch buttons: every finger is tracked on its own, so steering + brake + boost work together. */
+  private setupButtons(): void {
+    this.el.querySelectorAll<HTMLElement>('.tc-btn').forEach((b) => {
+      const k = b.dataset.k!;
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        b.setPointerCapture(e.pointerId);
+        this.held.set(e.pointerId, k);
+        b.classList.add('held');
+        navigator.vibrate?.(8);
+        this.recompute();
+      });
+      const up = (e: PointerEvent) => {
+        if (this.held.get(e.pointerId) !== k) return;
+        this.held.delete(e.pointerId);
+        if (![...this.held.values()].includes(k)) b.classList.remove('held');
+        this.recompute();
+      };
+      b.addEventListener('pointerup', up);
+      b.addEventListener('pointercancel', up);
+      b.addEventListener('contextmenu', (e) => e.preventDefault());
+    });
+  }
+
+  /** Tilt steering: the phone held in landscape like a wheel (about 25 degrees = full lock). */
+  private onTilt(e: DeviceOrientationEvent): void {
+    if (this.touchMode !== 'tilt' || e.beta === null) return;
+    const angle = screen.orientation?.angle ?? (window.orientation as number | undefined) ?? 90;
+    const raw = (angle === 90 ? 1 : angle === 270 || angle === -90 ? -1 : 0) * e.beta + (angle === 0 ? e.gamma ?? 0 : 0);
+    const dead = 2;
+    const v = Math.abs(raw) < dead ? 0 : (raw - Math.sign(raw) * dead) / 23;
+    this.tiltX = Math.max(-1, Math.min(1, v));
+    this.recompute();
+  }
+
+  private recompute(): void {
+    if (!this.isTouch) { this.touch = null; return; }
+    const keys = new Set(this.held.values());
+    let steer = 0;
+    if (this.touchMode === 'buttons') steer = (keys.has('right') ? 1 : 0) - (keys.has('left') ? 1 : 0);
+    else if (this.touchMode === 'stick') steer = this.stickX;
+    else steer = this.tiltX;
+    const brake = keys.has('brake') ? 1 : 0;
+    const throttle = brake ? 0 : this.autoGas || keys.has('gas') ? 1 : 0;
+    this.touch = { steer, throttle, brake, handbrake: keys.has('drift') ? 1 : 0 };
   }
 
   show(on: boolean): void {
@@ -168,10 +237,12 @@ export class Hud {
       let dy = (e.clientY - (r.top + r.height / 2)) / (r.height / 2);
       const l = Math.hypot(dx, dy);
       if (l > 1) { dx /= l; dy /= l; }
-      knob.style.transform = `translate(${dx * r.width * 0.35}px, ${dy * r.height * 0.35}px)`;
-      const dead = 0.15;
-      const steer = Math.abs(dx) > dead ? dx : 0;
-      this.touch = { steer, throttle: dy < -dead ? Math.min(1, -dy * 1.3) : 0, brake: dy > dead ? Math.min(1, dy * 1.3) : 0 };
+      knob.style.transform = `translate(${dx * r.width * 0.35}px, ${dy * r.height * 0.12}px)`;
+      // Steering only (gas / brake are buttons): a small dead zone, then a slightly progressive curve.
+      const dead = 0.12;
+      const ax = Math.max(0, Math.abs(dx) - dead) / (1 - dead);
+      this.stickX = Math.sign(dx) * ax ** 1.3;
+      this.recompute();
     };
     stick.addEventListener('pointerdown', (e) => { id = e.pointerId; stick.setPointerCapture(id); move(e); });
     stick.addEventListener('pointermove', (e) => { if (e.pointerId === id) move(e); });
@@ -179,7 +250,8 @@ export class Hud {
       if (e.pointerId !== id) return;
       id = null;
       knob.style.transform = '';
-      this.touch = null;
+      this.stickX = 0;
+      this.recompute();
     };
     stick.addEventListener('pointerup', end);
     stick.addEventListener('pointercancel', end);

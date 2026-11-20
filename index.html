@@ -2,21 +2,30 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Neon Velocity</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="description" content="Neon Velocity: a retro neon arcade racer with drifting, boost, eight worlds and online races." />
     <meta name="theme-color" content="#05010d" />
+    <!-- Installable as an app (home screen): full screen, landscape, no browser bars. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Neon Velocity" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap" rel="stylesheet" />
     <style>
-      html, body { margin: 0; height: 100%; background: #05010d; overflow: hidden; touch-action: none; }
+      html, body { margin: 0; height: 100%; background: #05010d; overflow: hidden; touch-action: none; overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
       #app { position: fixed; inset: 0; }
       canvas { display: block; }
+      input, textarea { -webkit-user-select: text; user-select: text; }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="rotate"><div class="phone"></div><div>TURN YOUR PHONE</div><div style="font-family:Arial,sans-serif;font-size:13px;opacity:.8">Neon Velocity is played in landscape.</div></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

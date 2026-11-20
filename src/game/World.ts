@@ -127,6 +127,8 @@ export class World {
   private boardSpots: { pos: THREE.Vector3; w: number; h: number }[] = [];
   /** Hook for level one-shot sounds (set by the app). */
   onLevelSound?: (kind: LevelSound) => void;
+  /** Hook for something hitting the player's car (set by the app: popup, sound, shake). */
+  onHit?: (label: string) => void;
   /** Hook for level events that shake the camera (set by the app). */
   onShake?: (amount: number) => void;
 
@@ -175,6 +177,7 @@ export class World {
       lanes: L.track.lanes,
       sections: L.track.sections,
       hills: L.track.hills,
+      minRadius: L.track.minRadius,
     });
     const reflectionScale = quality === 'low' ? 0.3 : quality === 'medium' ? 0.5 : 0.8;
     this.road = new Road(this.track, { reflectionScale, style: L.road, pillars: L.track.pillars });
@@ -195,6 +198,12 @@ export class World {
       sound: (kind) => this.onLevelSound?.(kind),
       shake: (amount) => this.onShake?.(amount),
       boards: () => this.boardSpots,
+      hitPlayer: (slow, label) => {
+        const p = this.cars[0]?.phys;
+        if (!p) return;
+        p.v *= 1 - slow;
+        this.onHit?.(label);
+      },
     });
     const billboards = new Billboards(this.track, built.roofSpots ?? [], built.faceSpots ?? [], L.seed, L.billboards, L.billboardStyle ?? 'neon', built.noBoards);
     this.boardSpots = billboards.spots;
@@ -226,13 +235,15 @@ export class World {
           return [playerCar, ...opp].map((setup, i) => ({ setup, slot: i === 0 ? mid : i <= mid ? i - 1 : i }));
         })();
     slots.forEach(({ setup, slot, netId, remote, name: netName }, i) => {
-      const car = buildCar({ style: setup.style, paint: setup.paint, accent: setup.accent, tier: setup.tier });
+      // Detail: low quality = light models for everyone; medium = only your own car in full detail.
+      const lowDetail = quality === 'low' || (quality === 'medium' && (online ? !!remote : i !== 0));
+      const car = buildCar({ style: setup.style, paint: setup.paint, accent: setup.accent, tier: setup.tier, lowDetail });
       car.group.add(createHeadlightBeams(car.style.width, 24, -car.style.length / 2, 0.55, L.time === 'day' ? 0.35 : L.time === 'dusk' ? 0.7 : L.id === 'orbit-run' ? 0.4 : 1)); // space: dark road + strong bloom made them glare
       for (const w of car.wheels) w.rotation.order = 'YXZ';
       this.scene.add(car.group);
       const row = Math.floor(slot / 2);
       const x = (slot % 2 === 0 ? -1 : 1) * this.track.width * 0.22;
-      const spec: CarSpec = { ...DEFAULT_SPEC, ...(setup.spec ?? {}), length: car.style.length, halfWidth: car.style.width / 2, driftMode: i === 0 && playerCar.driftMode };
+      const spec: CarSpec = { ...DEFAULT_SPEC, ...(setup.spec ?? {}), length: car.style.length, halfWidth: car.style.width / 2, driftMode: i === 0 && playerCar.driftMode, brakeSlide: i === 0 };
       this.cars.push({
         car,
         name: netName ?? (i === 0 ? 'YOU' : (setup as { name?: string }).name ?? `CPU ${i}`),
@@ -323,7 +334,7 @@ export class World {
   readonly npcs: CarEntry[] = [];
 
   addNpc(o: { setup: CarSetup; s: number; x: number; kind: 'traffic'; cruise?: number }): CarEntry {
-    const car = buildCar({ style: o.setup.style, paint: o.setup.paint, accent: o.setup.accent, tier: o.setup.tier });
+    const car = buildCar({ style: o.setup.style, paint: o.setup.paint, accent: o.setup.accent, tier: o.setup.tier, lowDetail: this.quality !== 'high' });
     car.group.add(createHeadlightBeams(car.style.width, 18, -car.style.length / 2, 0.55, this.level.time === 'day' ? 0.25 : 0.6));
     for (const w of car.wheels) w.rotation.order = 'YXZ';
     this.scene.add(car.group);

@@ -26,8 +26,12 @@ import { MAST_GRID, MAST_LIGHT_GLSL } from '../harborLights';
 export const CONTAINER = { length: 12, height: 2.6, width: 2.45 };
 const CONTAINER_COLORS = ['#c0392b', '#1f6fb2', '#e67e22', '#27ae60', '#8e44ad', '#d4ac0d', '#7f8c8d', '#16a085', '#b8442c', '#2a5a8a'].map((c) => new THREE.Color(c));
 const QUAY = MAST_GRID.quayY;
-/** Top of a ship's hull (world y), where its deck cargo stands. */
-const SHIP_DECK_Y = 6.05;
+/** Container ships: deck height above the water (world y), length and beam (m). */
+const SHIP_DECK_Y = 12;
+const SHIP_L = 290;
+const SHIP_B = 42;
+/** Tiers stacked in the docked ship's loading bay (the quay crane sets boxes down on top of them). */
+const LOAD_TIERS = 2;
 /** How far from the road's centre line the quay cranes stand (the quay ends 45 m out). */
 const QUAY_CRANE_LAT = 34;
 
@@ -303,31 +307,35 @@ class QuayCrane {
   }
 
   update(time: number, boxes: MovingBoxes): void {
-    // One work cycle (seconds): out over the ship, down, grab, up, in over the quay, down, release, up, out.
-    const T = 30, u = (((time + this.phase) % T) + T) % T;
-    const zShip = this.shipZ, zQuay = this.dropZ;
+    // Loading the ship, one box per 30 s: down to the box waiting at the foot of the conveyor tower, grab, hoist,
+    // trolley out over the ship, lower into the loading bay (a different row every time), let go, back.
+    const T = 30, tt = time + this.phase, cyc = Math.floor(tt / T), u = tt - cyc * T;
+    const row = ((cyc * 7) % 13) / 12 - 0.5;                            // -0.5 .. 0.5 across the ship
+    const zShip = this.shipZ + (row * (SHIP_B - 6)) / this.scale, zQuay = this.dropZ;
     const top = -7;                                                      // spreader hanging just under the trolley
     const boxH = CONTAINER.height / this.scale;
     const down = (levelAboveQuay: number) => levelAboveQuay / this.scale - (QuayCrane.BOOM_Y - 4.4); // spreader y (trolley-local) for a world level
     const overShip = down(this.deckY + CONTAINER.height), onQuay = down(1.5 + CONTAINER.height);
     const ease = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-    let z: number, y: number, loaded: boolean;
-    if (u < 4) { z = zShip; y = THREE.MathUtils.lerp(top, overShip, ease(0, 4, u)); loaded = false; }
-    else if (u < 5) { z = zShip; y = overShip; loaded = true; }
-    else if (u < 9) { z = zShip; y = THREE.MathUtils.lerp(overShip, top, ease(5, 9, u)); loaded = true; }
-    else if (u < 15) { z = THREE.MathUtils.lerp(zShip, zQuay, ease(9, 15, u)); y = top; loaded = true; }
-    else if (u < 19) { z = zQuay; y = THREE.MathUtils.lerp(top, onQuay, ease(15, 19, u)); loaded = true; }
-    else if (u < 20) { z = zQuay; y = onQuay; loaded = false; }
-    else if (u < 24) { z = zQuay; y = THREE.MathUtils.lerp(onQuay, top, ease(20, 24, u)); loaded = false; }
-    else { z = THREE.MathUtils.lerp(zQuay, zShip, ease(24, 30, u)); y = top; loaded = false; }
-    // A loaded spreader swings a little when the trolley moves.
+    let z: number, y: number;
+    let where: 'quay' | 'hook' | 'ship';
+    if (u < 4) { z = zQuay; y = THREE.MathUtils.lerp(top, onQuay, ease(0, 4, u)); where = 'quay'; }
+    else if (u < 5) { z = zQuay; y = onQuay; where = 'hook'; }
+    else if (u < 9) { z = zQuay; y = THREE.MathUtils.lerp(onQuay, top, ease(5, 9, u)); where = 'hook'; }
+    else if (u < 15) { z = THREE.MathUtils.lerp(zQuay, zShip, ease(9, 15, u)); y = top; where = 'hook'; }
+    else if (u < 19) { z = zShip; y = THREE.MathUtils.lerp(top, overShip, ease(15, 19, u)); where = 'hook'; }
+    else if (u < 20) { z = zShip; y = overShip; where = 'ship'; }
+    else if (u < 24) { z = zShip; y = THREE.MathUtils.lerp(overShip, top, ease(20, 24, u)); where = 'ship'; }
+    else { z = THREE.MathUtils.lerp(zShip, zQuay, ease(24, 30, u)); y = top; where = 'ship'; }
     this.trolley.position.z = z;
     this.spreader.position.y = y;
     for (const r of this.ropes) r.scale.y = -0.6 - (y + 1.4);
-    // The carried container hangs under the spreader (its long side across the boom).
-    this.tmp.set(0, QuayCrane.BOOM_Y - 4.4 + y - boxH, z);
+    // The container: waiting on the quay, hanging under the spreader, or set down in the ship.
+    if (where === 'hook') this.tmp.set(0, QuayCrane.BOOM_Y - 4.4 + y - boxH, z);
+    else if (where === 'quay') this.tmp.set(0, QuayCrane.BOOM_Y - 4.4 + onQuay - boxH, zQuay);
+    else this.tmp.set(0, QuayCrane.BOOM_Y - 4.4 + overShip - boxH, zShip);
     this.group.localToWorld(this.tmp);
-    boxes.set(this.slot, this.tmp.x, this.tmp.y, this.tmp.z, this.yaw, loaded);
+    boxes.set(this.slot, this.tmp.x, this.tmp.y, this.tmp.z, this.yaw, true);
   }
 }
 
@@ -543,89 +551,168 @@ function beltMeshes(belts: Belt[]): THREE.Object3D[] {
 
 // ------------------------------------------------------------------ conveyor bridge over the road
 
-const BRIDGE_OUT = 22;   // outer tower: metres from the road's centre line, on the crane's side
-const BRIDGE_IN = -21;   // inner tower: on the yard side
+const BRIDGE_OUT = 18;   // sea-side tower: metres from the road's centre line, on the crane's side
+const BRIDGE_IN = -21;   // yard-side tower
 const BRIDGE_CLEAR = 11.5; // roller deck above the road surface (lamp posts are 9 m)
-const BRIDGE_CYCLE = 30; // one container per crane cycle
+const BRIDGE_SPEED = 3.2;  // m/s along the conveyor
+const BRIDGE_PER_LANE = 4; // containers riding on each lane at once
+const LANE_Z = 7;          // the two lanes sit side by side along the road, ±7 m
 
 /**
- * A container bridge. Local frame: x = across the road (+ = the crane's side), z = along the road, y = up
- * (world heights). A container's long side lies along the road, so it crosses broadside-on.
+ * A two-lane container bridge over the road. Local frame: x = across the road (+ = the sea side), z = along
+ * the road, y = up (world heights). One lane carries containers from the yard out to the ship side, the other
+ * brings them in: each box rises up its tower's hoistway, rolls across over the traffic and is lowered at the
+ * far tower. There are always boxes on the move, so you see them whenever you pass. A container's long side
+ * lies along the road, so it crosses broadside-on.
  */
 class ConveyorBridge {
   readonly group = new THREE.Group();
-  private readonly hoists: THREE.Mesh[] = [];
   private readonly deckY: number;
   private readonly v = new THREE.Vector3();
+  private readonly pathLen: number;
 
   constructor(x: number, z: number, dirX: number, dirZ: number, roadY: number, private readonly yaw: number, private readonly phase: number, private readonly slots: number[], scheme: number) {
     this.group.name = 'conveyor-bridge';
     const deckY = (this.deckY = roadY + BRIDGE_CLEAR);
-    const half = CONTAINER.length / 2 + 0.55;                 // half the deck's width (along the road)
+    this.pathLen = 2 * (deckY - (QUAY + 1.5)) + (BRIDGE_OUT - BRIDGE_IN);
+    const half = LANE_Z + CONTAINER.length / 2 + 0.6;           // half the deck's width (along the road)
     const frame: THREE.BufferGeometry[] = [], rollers: THREE.BufferGeometry[] = [], lights: THREE.BufferGeometry[] = [];
     const topY = deckY + 7.2;
     for (const tx of [BRIDGE_OUT, BRIDGE_IN]) {
-      // Tower: four posts round the hoistway, ties, a head frame with the winch house.
-      for (const px of [-2.1, 2.1]) for (const pz of [-half, half]) frame.push(box(0.6, topY - QUAY, 0.6, tx + px, (topY + QUAY) / 2, pz));
+      // Tower: posts round the two hoistways, ties, X-bracing, a head frame with the winch house.
+      for (const px of [-2.1, 2.1]) for (const pz of [-half, 0, half]) frame.push(box(0.6, topY - QUAY, 0.6, tx + px, (topY + QUAY) / 2, pz));
       for (let y = QUAY + 6; y < topY; y += 6) for (const pz of [-half, half]) frame.push(box(4.4, 0.35, 0.35, tx, y, pz));
       for (const pz of [-half, half]) for (let y = QUAY + 0.5; y + 6 < topY; y += 6) frame.push(beam(tx - 2.1, y, pz, tx + 2.1, y + 6, pz, 0.22));
-      frame.push(box(4.8, 0.6, half * 2 + 0.6, tx, topY, 0), box(3, 1.8, 4, tx, topY + 1.2, 0));
+      frame.push(box(4.8, 0.6, half * 2 + 0.6, tx, topY, 0), box(3, 1.8, 6, tx, topY + 1.2, 0));
       for (const pz of [-half + 1, half - 1]) lights.push(box(0.5, 0.25, 0.5, tx, topY - 0.45, pz));
+      // Static hoist frames at the top of each hoistway.
+      for (const pz of [-LANE_Z, LANE_Z]) frame.push(box(3.2, 0.4, CONTAINER.length + 0.4, tx, topY - 1.2, pz));
     }
-    // Set-down plinth under the crane (the crane lowers the box onto it).
-    frame.push(box(3.4, 1.5, half * 2 - 0.6, BRIDGE_OUT, QUAY + 0.75, 0));
-    // Roller deck: two side girders with a truss above, rollers across.
+    // Set-down plinths at the foot of both towers.
+    for (const tx of [BRIDGE_OUT, BRIDGE_IN]) frame.push(box(3.4, 1.5, half * 2 - 0.6, tx, QUAY + 0.75, 0));
+    // Roller deck: side girders with a truss above, a middle girder between the lanes, rollers across.
     const len = BRIDGE_OUT - BRIDGE_IN, mid = (BRIDGE_OUT + BRIDGE_IN) / 2;
-    for (const pz of [-half, half]) {
-      frame.push(box(len, 0.7, 0.45, mid, deckY - 0.35, pz), box(len, 0.35, 0.35, mid, deckY + 3.4, pz));
-      for (let bx = BRIDGE_IN + 2.1; bx + 5.4 <= BRIDGE_OUT - 2; bx += 5.4) {
-        frame.push(beam(bx, deckY, pz, bx + 2.7, deckY + 3.4, pz, 0.2), beam(bx + 2.7, deckY + 3.4, pz, bx + 5.4, deckY, pz, 0.2));
+    for (const pz of [-half, 0, half]) {
+      frame.push(box(len, 0.7, 0.45, mid, deckY - 0.35, pz));
+      if (pz !== 0) {
+        frame.push(box(len, 0.35, 0.35, mid, deckY + 3.4, pz));
+        for (let bx = BRIDGE_IN + 2.1; bx + 5.4 <= BRIDGE_OUT - 2; bx += 5.4) frame.push(beam(bx, deckY, pz, bx + 2.7, deckY + 3.4, pz, 0.2), beam(bx + 2.7, deckY + 3.4, pz, bx + 5.4, deckY, pz, 0.2));
       }
     }
-    for (let bx = BRIDGE_IN + 2.6; bx < BRIDGE_OUT - 2.2; bx += 1.3) rollers.push(new THREE.CylinderGeometry(0.16, 0.16, half * 2, 8).rotateX(Math.PI / 2).translate(bx, deckY - 0.16, 0).toNonIndexed());
+    for (let bx = BRIDGE_IN + 2.6; bx < BRIDGE_OUT - 2.2; bx += 1.3) for (const pz of [-LANE_Z, LANE_Z]) rollers.push(new THREE.CylinderGeometry(0.16, 0.16, CONTAINER.length + 0.6, 8).rotateX(Math.PI / 2).translate(bx, deckY - 0.16, pz).toNonIndexed());
     for (let bx = BRIDGE_IN + 6; bx < BRIDGE_OUT - 4; bx += 8) for (const pz of [-half, half]) lights.push(box(0.45, 0.2, 0.45, bx, deckY - 0.85, pz));
     const colors = ['#e8b10e', '#d94a2a', '#3a8ac8', '#e9e6dc'];
     this.group.add(new THREE.Mesh(mergeGeometries(frame), steel(colors[scheme % colors.length])));
     this.group.add(new THREE.Mesh(mergeGeometries(rollers), steel('#9aa0aa')));
     this.group.add(new THREE.Mesh(mergeGeometries(lights), lampMat('#ffe2a8', 4)));
-    const warn = new THREE.Mesh(mergeGeometries([BRIDGE_OUT, BRIDGE_IN].map((tx) => new THREE.SphereGeometry(0.45, 12, 8).translate(tx, topY + 2.4, 0).toNonIndexed())), blinkMaterial());
-    this.group.add(warn);
-    // The two hoist frames (they grip a container from above).
-    for (let i = 0; i < 2; i++) {
-      const h = new THREE.Mesh(mergeGeometries([box(3.2, 0.4, CONTAINER.length + 0.4, 0, 0.2, 0), box(1.6, 0.9, 2.4, 0, 0.85, 0)]), steel('#e8c21a'));
-      this.hoists.push(h);
-      this.group.add(h);
-    }
+    this.group.add(new THREE.Mesh(mergeGeometries([BRIDGE_OUT, BRIDGE_IN].map((tx) => new THREE.SphereGeometry(0.45, 12, 8).translate(tx, topY + 2.4, 0).toNonIndexed())), blinkMaterial()));
     this.group.position.set(x, 0, z);
     this.group.rotation.y = Math.atan2(-dirZ, dirX);
     this.group.updateMatrixWorld(true);
   }
 
-  update(time: number, boxes: MovingBoxes): void {
-    // The crane lets go 19.5 s into its cycle; from then: up 5 s, across 12 s, down 5 s, at rest on the stack.
-    const tt = time + this.phase - 19.5;
-    const cyc = Math.floor(tt / BRIDGE_CYCLE), v = tt - cyc * BRIDGE_CYCLE;
-    const level = ((cyc % 3) + 3) % 3;                         // boxes already on the stack: 0, 1, 2, then it is cleared
-    const H = CONTAINER.height;
-    const ground = QUAY + 1.5, rest = QUAY + level * 2.65, ride = this.deckY;
-    const ease = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-    let bx: number, by: number;
-    if (v < 5) { bx = BRIDGE_OUT; by = THREE.MathUtils.lerp(ground, ride, ease(0, 5, v)); }
-    else if (v < 17) { bx = THREE.MathUtils.lerp(BRIDGE_OUT, BRIDGE_IN, (v - 5) / 12); by = ride; }
-    else if (v < 22) { bx = BRIDGE_IN; by = THREE.MathUtils.lerp(ride, rest, ease(17, 22, v)); }
-    else { bx = BRIDGE_IN; by = rest; }
-    const place = (slot: number, lx: number, ly: number, show: boolean) => {
-      this.group.localToWorld(this.v.set(lx, ly, 0));
-      boxes.set(slot, this.v.x, this.v.y, this.v.z, this.yaw, show);
-    };
-    place(this.slots[0], bx, by, true);
-    for (let i = 0; i < 2; i++) place(this.slots[1 + i], BRIDGE_IN, QUAY + i * 2.65, i < level);
-    // Hoists: the outer one rides up with the box and goes back down for the next; the inner one waits at the
-    // deck, takes the box down and comes back up.
-    const park = ride + H + 1.2;
-    this.hoists[0].position.set(BRIDGE_OUT, v < 5 ? by + H : v < 10 ? THREE.MathUtils.lerp(ride + H, ground + H + 2.5, ease(5, 10, v)) : ground + H + 2.5, 0);
-    this.hoists[1].position.set(BRIDGE_IN, v < 15 ? park : v < 17 ? THREE.MathUtils.lerp(park, ride + H, ease(15, 17, v)) : v < 22 ? by + H : THREE.MathUtils.lerp(rest + H, park, ease(22, 28, v)), 0);
+  /** Slots needed: two lanes of BRIDGE_PER_LANE boxes. */
+  static get slotCount(): number {
+    return BRIDGE_PER_LANE * 2;
   }
+
+  update(time: number, boxes: MovingBoxes): void {
+    const ground = QUAY + 1.5, rise = this.deckY - ground, cross = BRIDGE_OUT - BRIDGE_IN, P = this.pathLen;
+    for (let lane = 0; lane < 2; lane++) {
+      // Lane 0: yard -> ship side; lane 1: ship side -> yard.
+      const from = lane === 0 ? BRIDGE_IN : BRIDGE_OUT, to = lane === 0 ? BRIDGE_OUT : BRIDGE_IN;
+      const laneZ = lane === 0 ? -LANE_Z : LANE_Z;
+      for (let k = 0; k < BRIDGE_PER_LANE; k++) {
+        let d = ((time + this.phase) * BRIDGE_SPEED + (k * P) / BRIDGE_PER_LANE + lane * 11) % P;
+        if (d < 0) d += P;
+        let bx: number, by: number;
+        if (d < rise) { bx = from; by = ground + d; }
+        else if (d < rise + cross) { bx = from + (to - from) * ((d - rise) / cross); by = this.deckY; }
+        else { bx = to; by = this.deckY - (d - rise - cross); }
+        this.group.localToWorld(this.v.set(bx, by, laneZ));
+        boxes.set(this.slots[lane * BRIDGE_PER_LANE + k], this.v.x, this.v.y, this.v.z, this.yaw, true);
+      }
+    }
+  }
+}
+
+// ------------------------------------------------------------------ container ships
+
+const HULL_COLORS = ['#0c1424', '#141418', '#3a0e0e', '#0c2420']; // dark: the floodlights lift them a lot
+const FUNNEL_COLORS = ['#e8b10e', '#d94a2a', '#e9e6dc', '#2a7ae0'];
+
+/**
+ * A big container ship (290 m, 42 m beam, deck 12 m above the water), bow toward local -Z: a hull with a
+ * pointed bow and a red boot-top, the accommodation block with lit window bands and bridge wings near the
+ * stern, a funnel, and over a thousand containers stacked in bays along the deck (highest in the middle rows).
+ * `loadingBay`: the bay amidships is kept low (the quay crane sets boxes down there).
+ */
+function containerShip(mat: THREE.ShaderMaterial, scheme: number, rng: Rng, loadingBay: boolean): THREE.Group {
+  const g = new THREE.Group();
+  g.name = 'container-ship';
+  const L = SHIP_L, B = SHIP_B, D = SHIP_DECK_Y;
+  // Hull: a top-view outline extruded upward, coloured by height (boot-top red under the waterline).
+  const sh = new THREE.Shape();
+  sh.moveTo(-B / 2 + 4, -L / 2);
+  sh.lineTo(B / 2 - 4, -L / 2);
+  sh.quadraticCurveTo(B / 2, -L / 2, B / 2, -L / 2 + 8);
+  sh.lineTo(B / 2, L / 2 - 70);
+  sh.bezierCurveTo(B / 2, L / 2 - 30, B / 4, L / 2 - 6, 0, L / 2);
+  sh.bezierCurveTo(-B / 4, L / 2 - 6, -B / 2, L / 2 - 30, -B / 2, L / 2 - 70);
+  sh.lineTo(-B / 2, -L / 2 + 8);
+  sh.quadraticCurveTo(-B / 2, -L / 2, -B / 2 + 4, -L / 2);
+  const hullGeo = new THREE.ExtrudeGeometry(sh, { depth: D + 8, bevelEnabled: false, curveSegments: 12 }).rotateX(-Math.PI / 2).translate(0, -8, 0).toNonIndexed();
+  hullGeo.computeVertexNormals();
+  const hp = hullGeo.getAttribute('position'), hn = hullGeo.getAttribute('normal');
+  const col = new Float32Array(hp.count * 3);
+  const hullC = new THREE.Color(HULL_COLORS[scheme % HULL_COLORS.length]), red = new THREE.Color('#a8261c'), deckC = new THREE.Color('#3a4a3a'), white = new THREE.Color('#e9e6dc');
+  for (let i = 0; i < hp.count; i++) {
+    const y = hp.getY(i);
+    const c = hn.getY(i) > 0.9 ? deckC : y < 1.2 ? red : y > D - 1.4 ? white : hullC;
+    col.set([c.r, c.g, c.b], i * 3);
+  }
+  hullGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  hullGeo.deleteAttribute('uv');
+  g.add(new THREE.Mesh(hullGeo, steelVertexColors()));
+  // Accommodation block near the stern (+Z is the stern: the bow points to -Z after the extrude), bridge wings,
+  // window bands, a funnel behind it, a mast on the bow.
+  // (The outline's pointed end, +y, became world -z when the extrusion was stood up: the bow.)
+  const sternZ = L / 2 - 36;
+  const white2 = steel('#e9e6dc');
+  g.add(new THREE.Mesh(mergeGeometries([
+    box(32, 30, 16, 0, D + 15, sternZ),
+    box(B + 4, 2.6, 7, 0, D + 29, sternZ - 4.5),
+    box(10, 4, 10, 0, D + 32, sternZ),
+  ]), white2));
+  const windows: THREE.BufferGeometry[] = [];
+  for (let k = 0; k < 7; k++) windows.push(box(30, 1.2, 0.2, 0, D + 4 + k * 3.6, sternZ - 8.05));
+  windows.push(box(B + 3, 1.1, 0.2, 0, D + 29.4, sternZ - 8.05));
+  g.add(new THREE.Mesh(mergeGeometries(windows), lampMat('#ffd9a0', 2.4)));
+  g.add(new THREE.Mesh(box(9, 13, 12, 0, D + 36, sternZ + 14), steel(FUNNEL_COLORS[scheme % FUNNEL_COLORS.length])));
+  g.add(new THREE.Mesh(mergeGeometries([box(0.8, 16, 0.8, 0, D + 8, -L / 2 + 14), box(6, 0.5, 0.5, 0, D + 14, -L / 2 + 14)]), steel('#d8d8d8')));
+  g.add(new THREE.Mesh(mergeGeometries([new THREE.SphereGeometry(0.6, 10, 8).translate(0, D + 16.6, -L / 2 + 14).toNonIndexed(), new THREE.SphereGeometry(0.6, 10, 8).translate(0, D + 43, sternZ + 14).toNonIndexed()]), blinkMaterial(new THREE.Vector3(1, 1, 1), 0.5)));
+  // Containers: bays 13 m apart from the bow to the accommodation, 15 rows across, stacked 3-7 high.
+  const list: THREE.Matrix4[] = [];
+  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2); // long side along the ship
+  const one = new THREE.Vector3(1, 1, 1);
+  const rows = 15, pitch = 2.6;
+  for (let bz = -L / 2 + 32; bz < sternZ - 16; bz += 13) {
+    const nearBow = bz < -L / 2 + 60;
+    for (let r = 0; r < rows; r++) {
+      const across = (r - (rows - 1) / 2) * pitch;
+      if (nearBow && Math.abs(across) > B / 2 - 6 - (L / 2 - 60 + bz) * -0.15) continue; // the bow narrows
+      const centre = 1 - Math.abs(across) / (B / 2);
+      let tiers = Math.round(3 + 4 * centre + rng.range(-1.2, 0.8));
+      if (loadingBay && Math.abs(bz) < 7) tiers = LOAD_TIERS;
+      for (let t = 0; t < tiers; t++) list.push(new THREE.Matrix4().compose(new THREE.Vector3(across, D + t * 2.65, bz), q, one));
+    }
+  }
+  const boxes = containerMesh(list.length, mat);
+  list.forEach((m, i) => boxes.setMatrixAt(i, m));
+  boxes.count = list.length;
+  boxes.computeBoundingSphere();
+  g.add(boxes);
+  return g;
 }
 
 // ------------------------------------------------------------------ service lanes beside the road
@@ -805,10 +892,12 @@ export function buildHarborYard(track: LoopTrack, rng: Rng, quality: 'low' | 'me
       let water = true;
       for (const lat of [70, 95, 120, 150]) { const [wx, wz] = at(lat); if (insideTrack(track, wx, wz) || nearest(wx, wz) < 58) water = false; }
       if (!water) continue;
-      const scale = [0.8, 1.0, 1.18][quaySpots.length % 3];
+      // Big cranes for big ships: the trolley has to clear seven tiers of containers on a 12 m deck.
+      const scale = [1.1, 1.25, 1.4][quaySpots.length % 3];
       const yaw = Math.atan2(frame.right.x * side, frame.right.z * side); // the boom (+Z) points out over the water
       quaySpots.push({ x: cx, z: cz, yaw, scale, d, side });
-      const [sx, sz] = at(QUAY_CRANE_LAT + 46 * scale + 9);
+      // The ship lies alongside, its near side just past the crane's sea-side legs, its length along the quay.
+      const [sx, sz] = at(QUAY_CRANE_LAT + 7 * scale + 6 + SHIP_B / 2);
       ships.push({ x: sx, y: 0, z: sz, yaw: yaw + Math.PI / 2 });
       lastD = d;
       break;
@@ -818,8 +907,8 @@ export function buildHarborYard(track: LoopTrack, rng: Rng, quality: 'low' | 'me
   for (let i = 0; i < 2; i++) {
     track.frameAt(rng.range(0, track.length), frame);
     for (const side of [-1, 1]) {
-      const x = frame.position.x + frame.right.x * side * 230, z = frame.position.z + frame.right.z * side * 230;
-      if (!insideTrack(track, x, z) && nearest(x, z) > 180) { ships.push({ x, y: 0, z, yaw: rng.range(0, Math.PI) }); break; }
+      const x = frame.position.x + frame.right.x * side * 330, z = frame.position.z + frame.right.z * side * 330;
+      if (!insideTrack(track, x, z) && nearest(x, z) > 250) { ships.push({ x, y: 0, z, yaw: rng.range(0, Math.PI) }); break; }
     }
   }
 
@@ -836,15 +925,13 @@ export function buildHarborYard(track: LoopTrack, rng: Rng, quality: 'low' | 'me
 
   // --- Build it.
   const mat = containerMaterial();
-  // Deck cargo on the docked ships (two layers, across the hull), part of the static containers.
-  for (let i = 0; i < quaySpots.length; i++) {
-    const s = ships[i];
-    const along = new THREE.Vector3(Math.sin(s.yaw), 0, Math.cos(s.yaw)), across = new THREE.Vector3(Math.cos(s.yaw), 0, -Math.sin(s.yaw));
-    for (let a = -38; a <= 26; a += 13) for (let c = -2; c <= 2; c++) {
-      const n = rng.int(0, 2);
-      for (let l = 0; l < n; l++) stacks.push({ x: s.x + along.x * a + across.x * c * 2.7, y: SHIP_DECK_Y + l * 2.65, z: s.z + along.z * a + across.z * c * 2.7, yaw: s.yaw + Math.PI / 2 });
-    }
-  }
+  // The ships themselves (docked ones get a low loading bay amidships, under their crane).
+  ships.forEach((sp, i) => {
+    const ship = containerShip(mat, i, rng, i < quaySpots.length);
+    ship.position.set(sp.x, 0, sp.z);
+    ship.rotation.y = sp.yaw;
+    group.add(ship);
+  });
   const staticBoxes = containerMesh(stacks.length, mat);
   const m4 = new THREE.Matrix4(), q4 = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
   stacks.forEach((p, i) => {
@@ -858,7 +945,7 @@ export function buildHarborYard(track: LoopTrack, rng: Rng, quality: 'low' | 'me
   if (belts.length) for (const o of beltMeshes(belts)) group.add(o);
 
   // Conveyor bridges over the road at every other quay crane (clear of the tunnel / canopy).
-  const bridged = quaySpots.map((q, i) => i % 2 === 0 && !track.sectionAt(q.d, 25));
+  const bridged = quaySpots.map((q) => !track.sectionAt(q.d, 25));
   // Service lanes on the yard side of the road: three stretches of 380 m, away from roofs.
   const lanes: Lane[] = [];
   for (let k = 0; k < 3; k++) {
@@ -885,16 +972,16 @@ export function buildHarborYard(track: LoopTrack, rng: Rng, quality: 'low' | 'me
     for (let i = 0; i < n; i++) carriers.push({ loop: L, s0: (i / n) * loopLength(L) + rng.range(-8, 8), box: -1, loaded: rng.chance(0.7) });
   }
   for (const b of belts) for (let o = 0; o < b.x1 - b.x0; o += BELT_GAP) beltLoads.push({ belt: b, offset: o, box: -1 });
-  slots += carriers.length + beltLoads.length + laneCarriers.length + bridged.filter(Boolean).length * 3;
+  slots += carriers.length + beltLoads.length + laneCarriers.length + bridged.filter(Boolean).length * ConveyorBridge.slotCount;
   const boxes = new MovingBoxes(slots, mat);
   group.add(boxes.mesh);
-  const quayCranes = quaySpots.map((q, i) => new QuayCrane(q.x, q.z, q.yaw, q.scale, i, i * 7.3, boxes.alloc(), 46 + 9 / q.scale, SHIP_DECK_Y - QUAY + 2 * 2.65,
-    bridged[i] ? -(QUAY_CRANE_LAT - BRIDGE_OUT) / q.scale : 9));
+  const quayCranes = quaySpots.map((q, i) => new QuayCrane(q.x, q.z, q.yaw, q.scale, i, i * 7.3, boxes.alloc(), (7 * q.scale + 6 + SHIP_B / 2) / q.scale,
+    SHIP_DECK_Y + LOAD_TIERS * 2.65 - QUAY, bridged[i] ? -(QUAY_CRANE_LAT - BRIDGE_OUT) / q.scale : 9));
   const bridges: ConveyorBridge[] = [];
   quaySpots.forEach((q, i) => {
     if (!bridged[i]) return;
     track.frameAt(q.d, frame);
-    const b = new ConveyorBridge(frame.position.x, frame.position.z, frame.right.x * q.side, frame.right.z * q.side, frame.position.y, q.yaw, i * 7.3, [boxes.alloc(), boxes.alloc(), boxes.alloc()], i);
+    const b = new ConveyorBridge(frame.position.x, frame.position.z, frame.right.x * q.side, frame.right.z * q.side, frame.position.y, q.yaw, i * 7.3, Array.from({ length: ConveyorBridge.slotCount }, () => boxes.alloc()), i);
     bridges.push(b);
     group.add(b.group);
   });
@@ -960,7 +1047,7 @@ export function buildHarborYard(track: LoopTrack, rng: Rng, quality: 'low' | 'me
     ...quaySpots.map((q) => ({ d0: q.d - 45, d1: q.d + 45, side: 0 })),
     ...lanes.map((L) => ({ d0: L.d0 - 22, d1: L.d1 + 22, side: Math.sign(L.lat) })),
   ];
-  return { group, update, ships, noBoards };
+  return { group, update, ships: [], noBoards };
 }
 
 /** Vertex-coloured painted steel (the carriers), lit by the masts like the rest. */

@@ -70,11 +70,62 @@ export class AudioEngine {
     return this.ctx !== null;
   }
 
+  // Watchdog. The audio output can stall on its own (an audio device dropping out or being switched, a driver
+  // hiccup): the context then stops advancing or will not resume, and the game goes silent for good. Once a
+  // second: if the page is visible and the audio clock has not moved for two seconds, or the context will not
+  // run again, the whole audio system is rebuilt and carries on with the same music, ambience and engine.
+  private lastClock = -1;
+  private stallFor = 0;
+  readonly watchdogTimer = window.setInterval(() => this.checkAlive(), 1000);
+
+  private checkAlive(): void {
+    const ctx = this.ctx;
+    if (!ctx || document.hidden) { this.stallFor = 0; this.lastClock = -1; return; }
+    const now = ctx.currentTime;
+    const stuck = ctx.state !== 'running' || (this.lastClock >= 0 && now - this.lastClock < 0.25);
+    this.lastClock = now;
+    if (!stuck) { this.stallFor = 0; return; }
+    this.stallFor++;
+    if (ctx.state !== 'running' && ctx.state !== 'closed') void ctx.resume().catch(() => {});
+    if (this.stallFor >= 2) this.rebuild();
+  }
+
+  /** Throw the stalled audio context away and start a fresh one with the same music, ambience and engine. */
+  private rebuild(): void {
+    const old = this.ctx;
+    if (!old) return;
+    console.warn('Audio output stalled: restarting the audio system');
+    this.pendingMusic = this.music?.current || this.pendingMusic;
+    for (const k of ['sfx', 'music', 'ui', 'ambience'] as const) {
+      const part = this[k] as unknown as { dispose?: () => void } | null;
+      part?.dispose?.();
+    }
+    this.music?.stopAll?.();
+    this.ambience?.set('none');
+    this.ctx = null;
+    this.sfx = null;
+    this.music = null;
+    this.ui = null;
+    this.ambience = null;
+    this.master = this.musicBus = this.sfxBus = this.ambienceBus = null;
+    this.musicAnalyser = null;
+    this.bassBins = null;
+    this.stallFor = 0;
+    this.lastClock = -1;
+    void old.close().catch(() => {});
+    this.init();
+    if (this.ctx && (this.ctx as AudioContext).state === 'suspended') void (this.ctx as AudioContext).resume().catch(() => {});
+  }
+
   private init(): void {
     if (this.ctx) return;
     const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) return;
-    const ctx = new Ctx();
+    // 'playback': a larger output buffer (some tens of ms instead of ~10). The default lowest-latency mode
+    // leaves the audio thread almost no slack, so while the GPU and the game loop are busy Windows can make it
+    // miss a deadline: crackles and stutter, as if the audio is starved. A racing game doesn't need 10 ms.
+    let ctx: AudioContext;
+    try { ctx = new Ctx({ latencyHint: 'playback' }); } catch { ctx = new Ctx(); }
     this.ctx = ctx;
     // The browser can stop the context on its own (output device switched, audio service hiccup): start it
     // again as soon as that happens while the page is visible.

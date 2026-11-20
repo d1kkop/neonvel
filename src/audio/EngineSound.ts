@@ -331,12 +331,13 @@ export class EngineSound {
     this.rpmNow = p.idle;
     this.previewTimer = window.setInterval(() => {
       const t = (performance.now() - t0) / 1000;
-      // 0.5 s at idle, 3.2 s flat out up to 60 % of top speed, then off the throttle.
-      const run = Math.max(0, Math.min(1, (t - 0.5) / 3.2));
-      const coast = Math.max(0, t - 3.7);
-      const speed = t < 0.5 ? 0 : Math.max(0.04, 0.6 * Math.pow(run, 0.8) - coast * 0.12);
-      this.update({ rpm: 900, throttle: t > 0.5 && t < 3.7 ? 1 : 0, gear: 1, slip: 0, speed01: speed }, true, 0.03);
-      if (t > 4.6) {
+      // 0.5 s at idle, 5.5 s flat out up to 75 % of top speed (every gear pulled to just under the redline),
+      // then off the throttle.
+      const run = Math.max(0, Math.min(1, (t - 0.5) / 5.5));
+      const coast = Math.max(0, t - 6);
+      const speed = t < 0.5 ? 0 : Math.max(0.04, 0.75 * Math.pow(run, 0.9) - coast * 0.14);
+      this.update({ rpm: 900, throttle: t > 0.5 && t < 6 ? 1 : 0, gear: 1, slip: 0, speed01: speed }, true, 0.03);
+      if (t > 7) {
         window.clearInterval(this.previewTimer);
         this.previewing = false;
         this.setActive(false);
@@ -372,6 +373,8 @@ export class EngineSound {
       const k = Math.max(0, Math.min(1.06, (s.speed01 - lo) / (G[this.aGear] - lo)));
       // In gear the engine works between about a quarter and nine tenths of its range (not pinned at the top).
       frac = this.aGear === 0 ? 0.06 + 0.84 * k : 0.22 + 0.68 * k;
+      // Garage demo: show the engine off — each gear revs out to just under the redline before the shift.
+      if (this.previewing && thr > 0.5) frac = this.aGear === 0 ? 0.08 + 0.9 * k : 0.34 + 0.64 * Math.pow(Math.min(1, k), 1.15);
     }
     if (shifted) this.shiftLeft = P.shiftTime;
     this.shiftLeft = Math.max(0, this.shiftLeft - dt);

@@ -152,12 +152,12 @@ export class AnthemPlayer {
     delay.connect(dFilter).connect(fb).connect(delay);
     dFilter.connect(this.bus);
     // Big hall reverb.
-    const hall = makeReverb(c, 3.4, 2.6);
+    const hall = makeReverb(c, 2.4, 2.4); // (shorter impulse = much less work for the audio thread)
     this.reverbSend = c.createGain();
     this.reverbSend.gain.value = 0.55;
     this.reverbSend.connect(hall).connect(this.bus);
     // Gated reverb for the snare (opened per hit, slammed shut).
-    const room = makeReverb(c, 1.6, 1.5);
+    const room = makeReverb(c, 1.1, 1.5);
     this.gateSend = c.createGain();
     this.gate = c.createGain();
     this.gate.gain.value = 0;

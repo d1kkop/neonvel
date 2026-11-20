@@ -92,6 +92,8 @@ export interface LevelBuildContext {
   sound?(kind: LevelSound): void;
   /** The level's billboards (centre, width, height). Filled in after build(): call it from an update, not while building. */
   boards(): { pos: THREE.Vector3; w: number; h: number }[];
+  /** Something hit the player's car (a snake bite): lose this share of speed (0..1) and show `label`. */
+  hitPlayer?(slow: number, label: string): void;
   /** Shake the player's camera (0..1), e.g. for an impact nearby. */
   shake?(amount: number): void;
 }
@@ -129,6 +131,8 @@ export interface LevelDef {
     pillars: boolean;
     /** Rolling hills along the track: [cycles per lap, amplitude m, phase]. */
     hills?: [number, number, number][];
+    /** Corners are opened up to at least this radius (m); default 50, 0 = the drawn line exactly. */
+    minRadius?: number;
   };
   sky: SkyParams;
   atmosphere: AtmosphereParams;

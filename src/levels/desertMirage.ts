@@ -161,21 +161,22 @@ export const desertMirage: LevelDef = {
     // Rattlesnakes: three of them round the lap, each coiled round a street-lamp post (the posts stand every
     // 40 m on the barrier, right-hand ones on the 40 m marks, left-hand ones in between).
     const snakePoles: SnakePole[] = [];
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < 5; k++) {
       const side = rng.chance(0.5) ? 1 : -1;
       const sp = ROAD_STYLE.lightSpacing;
-      let d = Math.round(((k + 0.55) * track.length) / 3 / sp) * sp + (side < 0 ? sp / 2 : 0);
+      let d = Math.round(((k + 0.55) * track.length) / 5 / sp) * sp + (side < 0 ? sp / 2 : 0);
       for (let tries = 0; tries < 8 && track.sectionAt(d, 45); tries++) d += sp;
       if (track.sectionAt(d, 45)) continue;
-      // Its post, and the next post on the other side of the road (20 m further on) that it can leap to.
+      // Its post, and the nearest post on the other side of the road, 20 m back toward the oncoming car: the leap
+      // goes diagonally across the road toward you, so it passes right in front of the windscreen.
       const post = (dd: number, sd: number) => {
         track.frameAt(dd, frame);
         const lat = sd * (track.width / 2 + ROAD_STYLE.wallThickness * 0.5);
         return { x: frame.position.x + frame.right.x * lat, y: frame.position.y + ROAD_STYLE.wallHeight, z: frame.position.z + frame.right.z * lat, s: dd };
       };
-      snakePoles.push({ ...post(d, side), other: track.sectionAt(d + sp / 2, 8) ? undefined : post(d + sp / 2, -side) });
+      snakePoles.push({ ...post(d, side), other: track.sectionAt(d - sp / 2, 8) ? undefined : post(d - sp / 2, -side) });
     }
-    const snakes = new PoleSnakes(snakePoles, track.length, () => ctx.sound?.('hiss'));
+    const snakes = new PoleSnakes(snakePoles, track.length, () => ctx.sound?.('hiss'), 0.5, () => ctx.hitPlayer?.(0.3, 'SNAKE BITE!'));
     scene.add(snakes.group);
 
     // Eagles: perched right on the edge of four mesa tops, on the side facing the road, heads following the
@@ -192,23 +193,34 @@ export const desertMirage: LevelDef = {
       const gap = best - m.r;
       return { m, gap, steep: m.h / Math.max(gap, 1), dx: (bx - m.x) / best, dz: (bz - m.z) / best, roadS: track.nearestSample(bx, bz) * track.sampleStep };
     }).sort((a, b) => (a.steep > 0.7 ? 1e4 + a.steep : a.gap) - (b.steep > 0.7 ? 1e4 + b.steep : b.gap));
-    const perches = nearRoad.slice(0, 4).map(({ m, dx, dz, roadS }) => {
+    const perches = nearRoad.slice(0, 2).map(({ m, dx, dz, roadS }) => {
       const r = mesaTopRadius(m, dx, dz) - 1.2;
       return { x: m.x + dx * r, y: m.y + m.h - 0.05, z: m.z + dz * r, yaw: Math.atan2(dx, dz), scale: 6.5, roadS };
     });
     const roadFrame = makeFrame();
     const eagles = new PerchedEagles(perches, track.length, (d, out) => out.copy(track.frameAt(d, roadFrame).position));
     scene.add(eagles.group);
-    const soaring = new SoaringEagles(nearRoad.slice(1, 3).map(({ m }) => ({ x: m.x, y: m.y + m.h + 38, z: m.z })));
+    // Circling eagles: four spread round the lap, each circling over open desert 45-60 m off the road.
+    const circles: { x: number; y: number; z: number }[] = [];
+    for (let k = 0; k < 4; k++) {
+      const d = ((k + 0.3) * track.length) / 4;
+      track.frameAt(d, frame);
+      const sd = k % 2 ? 1 : -1, lat = sd * (track.width / 2 + 45 + rng.range(0, 15));
+      const x = frame.position.x + frame.right.x * lat, z = frame.position.z + frame.right.z * lat;
+      circles.push({ x, y: terrain.heightAt(x, z), z });
+    }
+    const soaring = new SoaringEagles(circles);
     scene.add(soaring.group);
     const flock = new BirdFlock(ctx.quality === 'low' ? 26 : 44);
+    flock.onHit = () => ctx.hitPlayer?.(0.18, 'BIRD STRIKE!');
+    eagles.onHit = () => ctx.hitPlayer?.(0.22, 'EAGLE STRIKE!');
     scene.add(flock.mesh);
     const playerPos = new THREE.Vector3();
     ctx.onUpdate((time, dt) => {
       const pl = ctx.player();
       track.frameAt(pl.s, frame);
       playerPos.copy(frame.position).addScaledVector(frame.right, pl.x);
-      flock.update(time, dt, playerPos);
+      flock.update(time, dt, playerPos, frame.forward, frame.right, pl.v);
       soaring.update(time);
       eagles.update(time, dt, playerPos, pl.s, pl.v);
       snakes.update(dt, playerPos, pl.s, pl.v);

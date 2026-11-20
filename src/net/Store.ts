@@ -2,6 +2,8 @@
  * Client side of the car store. The server owns prices and decides what a player owns;
  * this only asks. Free cars never need the server.
  */
+import { serverHttp } from './serverUrl';
+
 export type StoreMode = 'stripe' | 'test' | 'off' | 'offline';
 
 export interface LapBoard {
@@ -13,16 +15,49 @@ export interface LapBoard {
   total: number;
 }
 
-export class Store {
-  constructor(private serverUrl: string) {}
+export interface Profile { id: string; name: string; rating: number; games: number; owned: string[] }
 
-  setServer(url: string): void {
-    this.serverUrl = url;
+export class Store {
+  private readonly base = serverHttp();
+
+  /** Sign-in options the server offers. */
+  async providers(): Promise<{ google: boolean; discord: boolean; dev: boolean } | null> {
+    try {
+      return (await (await fetch(`${this.base}/auth/providers`, { signal: AbortSignal.timeout(2500) })).json()) as { google: boolean; discord: boolean; dev: boolean };
+    } catch {
+      return null;
+    }
   }
 
-  /** ws://host:port → http://host:port */
-  private get base(): string {
-    return this.serverUrl.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/$/, '');
+  /** Go to the sign-in page (Google / Discord); it comes back to this page with the session in the address. */
+  signIn(provider: 'google' | 'discord' | 'dev', devName = ''): void {
+    const ret = window.location.origin + window.location.pathname;
+    window.location.href = `${this.base}/auth/${provider}/start?return=${encodeURIComponent(ret)}${provider === 'dev' ? `&name=${encodeURIComponent(devName)}` : ''}`;
+  }
+
+  /** The signed-in player (null = token no longer valid, undefined = server offline). */
+  async me(token: string, timeoutMs = 10000): Promise<Profile | null | undefined> {
+    try {
+      const r = await fetch(`${this.base}/auth/me?token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(timeoutMs) });
+      return r.status === 401 ? null : ((await r.json()) as Profile);
+    } catch {
+      return undefined;
+    }
+  }
+
+  async rename(token: string, name: string): Promise<{ name?: string; error?: string }> {
+    try {
+      const r = await fetch(`${this.base}/auth/rename`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, name }), signal: AbortSignal.timeout(4000) });
+      return (await r.json()) as { name?: string; error?: string };
+    } catch {
+      return { error: 'Server offline.' };
+    }
+  }
+
+  async signOut(token: string): Promise<void> {
+    try {
+      await fetch(`${this.base}/auth/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }), signal: AbortSignal.timeout(3000) });
+    } catch { /* offline: forget it locally anyway */ }
   }
 
   async mode(): Promise<StoreMode> {
@@ -44,31 +79,19 @@ export class Store {
   }
 
   /** A track's fastest-lap board: the top 50 and where `name` stands. null = server offline. */
-  async lapBoard(level: string, name: string): Promise<LapBoard | null> {
+  async lapBoard(level: string, token: string): Promise<LapBoard | null> {
     try {
-      const r = await fetch(`${this.base}/laptimes?level=${encodeURIComponent(level)}&name=${encodeURIComponent(name)}`, { signal: AbortSignal.timeout(2500) });
+      const r = await fetch(`${this.base}/laptimes?level=${encodeURIComponent(level)}&token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(2500) });
       return (await r.json()) as LapBoard;
     } catch {
       return null;
     }
   }
 
-  /** Report a lap time (the server keeps it only if it is this driver's fastest on the track). */
-  async submitLap(name: string, level: string, ms: number, car: string): Promise<{ best?: number; improved?: boolean; rank?: number; error?: string } | null> {
+  async owned(token: string): Promise<string[] | null> {
+    if (!token) return [];
     try {
-      const r = await fetch(`${this.base}/laptime`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, level, ms, car }), signal: AbortSignal.timeout(4000),
-      });
-      return (await r.json()) as { best?: number; improved?: boolean; rank?: number; error?: string };
-    } catch {
-      return null;
-    }
-  }
-
-  async owned(name: string): Promise<string[] | null> {
-    if (!name) return [];
-    try {
-      const r = await fetch(`${this.base}/store/owned?name=${encodeURIComponent(name)}`, { signal: AbortSignal.timeout(2500) });
+      const r = await fetch(`${this.base}/store/owned?token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(2500) });
       return ((await r.json()) as { owned: string[] }).owned;
     } catch {
       return null;
@@ -76,12 +99,12 @@ export class Store {
   }
 
   /** Starts a purchase. Stripe: redirects to checkout. Test mode: granted immediately. */
-  async buy(name: string, item: string): Promise<{ granted?: boolean; test?: boolean; owned?: string[]; error?: string; redirected?: boolean }> {
+  async buy(token: string, item: string): Promise<{ granted?: boolean; test?: boolean; owned?: string[]; error?: string; redirected?: boolean }> {
     try {
       const r = await fetch(`${this.base}/store/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, item }),
+        body: JSON.stringify({ token, item }),
         signal: AbortSignal.timeout(8000),
       });
       const res = (await r.json()) as { url?: string; granted?: boolean; test?: boolean; owned?: string[]; error?: string };

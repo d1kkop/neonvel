@@ -52,7 +52,9 @@ export function controlsHtml(): string {
       ${row('Camera', key('C'))}
       ${row('Mute / next song', `${key('M')} ${key('N')}`)}
       <div class="ctl-head" style="margin-top:12px">Touch</div>
-      ${row('Drive', 'drag the circle: up / down = gas / brake, left / right = steer')}`;
+      ${row('Steer', '◀ ▶ buttons bottom-left (or the stick / tilting the phone: Options › Touch)')}
+      ${row('Gas / brake', 'gas is automatic (Options › Touch › Auto gas); hold BRAKE bottom-right to slow down')}
+      ${row('Drift / boost', 'hold DRIFT while steering hard; BOOST button')}`;
   }
   const ps = kind === 'playstation';
   const L1 = pill(ps ? 'L1' : 'LB'), R1 = pill(ps ? 'R1' : 'RB'), L2 = pill(ps ? 'L2' : 'LT'), R2 = pill(ps ? 'R2' : 'RT');

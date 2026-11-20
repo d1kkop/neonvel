@@ -1,0 +1,36 @@
+// Neon Velocity on Cloudflare: one Worker serves the game files (../dist) and the game server
+// (sign-in, store, leaderboards, Stripe webhook); Durable Objects run the lobby (matchmaking) and one room per
+// online race; D1 (SQLite) holds players, sessions, lap records and purchases.
+//
+// Local:  npm run server            (wrangler dev on port 8787, local D1 + Durable Objects, secrets from .dev.vars)
+// Deploy: npm run deploy            (see cloud/README.md for the one-time setup)
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "neon-velocity",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // The built game (npm run build). API paths are not files, so they reach the Worker.
+  "assets": { "directory": "../dist", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/ws", "/room/*", "/auth/*", "/store/*", "/stripe/*", "/laptimes", "/leaderboard"] },
+  "durable_objects": {
+    "bindings": [
+      { "name": "LOBBY", "class_name": "Lobby" },
+      { "name": "ROOM", "class_name": "Room" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Lobby", "Room"] }],
+  "d1_databases": [
+    // database_id: filled in by `wrangler d1 create neon-velocity` on first deploy (see README). Local dev ignores it.
+    { "binding": "DB", "database_name": "neon-velocity", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
+  ],
+  "vars": {
+    // Where the game is served. Production: your https address (e.g. https://neonvelocity.com/).
+    "PUBLIC_URL": "http://localhost:5173/",
+    "STORE_CURRENCY": "eur",
+    "STRIPE_TAX": "1"
+  },
+  "dev": { "port": 8787, "ip": "0.0.0.0" },
+  "observability": { "enabled": true }
+  // Secrets (never in this file): STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+  // DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, TICKET_SECRET  →  `wrangler secret put NAME` (local: cloud/.dev.vars)
+}

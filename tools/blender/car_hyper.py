@@ -1,13 +1,14 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from carlib3 import Car3
+from carlib4 import Car4
 
 # Aurum Hyper (locked) — v3 hypercar: one-piece body with a teardrop canopy, raised front fenders over a low
 # hood, deep side scoops ahead of wide rear hips, LED slot headlights, light-bar tail, big carbon wing.
 # keys: t (0 nose .. 1 tail); zb floor, hw width (x HW), zw widest-point height, scoop (side scallop 0..1),
 # sh/zsh shoulder (x of width, z), fx/zf fender peak, vx/zv hood valley / belt, gb/zg glass base, rw/zr roof side,
 # crown roof camber. Later keys inherit earlier values.
-c = Car3('hyper', dict(
+c = Car4('hyper', dict(
+    subdiv=3,
     preview_color=(0.83, 0.6, 0.08), rim='star5',
     keys=[
         dict(t=0.00, zb=0.17, hw=0.80, zw=0.30, scoop=0.0, sh=0.93, zsh=0.40, fx=0.80, zf=0.46, vx=0.56, zv=0.445, gb=0.40, zg=0.445, rw=0.22, zr=0.45, crown=0.004),
@@ -27,18 +28,22 @@ c = Car3('hyper', dict(
     ],
     cabin=dict(ws=(0.285, 0.445), side=(0.33, 0.6), rear=(0.6, 0.7)),
     doors=(0.31, 0.56), bonnet=(0.035, 0.265), bonnet_w=0.48,
-    cage_along=38, crease_sill=0.9, crease_shoulder=0.9, crease_fender=0.55, crease_belt=0.6, end_crease=0.75,
+    cage_along=72, crease_sill=0.9, crease_shoulder=0.9, crease_fender=0.55, crease_belt=0.6, end_crease=0.75,
     tail_kx=0.86, tail_kz=0.86, tail_dt=0.012,
 ))
 c.body()
-c.led_headlights(x=0.62, z=0.5, w=0.42, h=0.08)
+c.projector_headlights(x=0.62, z=0.5, w=0.46, h=0.1)
 c.front_intakes(z=0.27)
-c.hood_vents(t=0.13, x=0.3)
-c.side_scoops(t=0.645, z=0.52)
-c.engine_louvres(0.71, 0.86, w=0.5)
-c.rear_end(z_lamp=0.8, z_grille=0.55)
+c.canards(z=0.3)
+c.hood_vents(t=0.13, x=0.3, n_fins=6)
+c.carbon_scoops(t=0.645, z=0.52)
+c.louvres_fine(0.71, 0.86, w=0.5)
+c.segmented_lightbar(z_lamp=0.8)
+c.rear_lower(z_grille=0.55)
 c.big_wing(t=0.94, height=0.3)
-c.mirrors3(0.335)
+c.aero_mirrors(0.335)
+c.door_handles(0.5)
+c.fuel_cap(0.75)
 c.splitter3()
 c.sills3(0.3, 0.6)
 c.finish()

@@ -228,7 +228,9 @@ export class Road {
   /** World positions + colours of street-lamp heads (for volumetric beams). */
   readonly lamps: { pos: THREE.Vector3; color: THREE.Color }[] = [];
   /** Neon strip materials + their base colour (they pulse to the music's beat) and how hard each one pulses. */
-  readonly neonMats: { mat: THREE.MeshBasicMaterial; base: THREE.Color; gain: number }[] = [];
+  readonly neonMats: { mat: THREE.MeshBasicMaterial; base: THREE.Color; gain: number; side: number }[] = [];
+  /** 1 = only the left-hand neon strips pulse to the beat (default), 2 = both sides (player option). */
+  beatSides = 1;
 
   /**
    * 0..1 beat pulse (1 right on the beat, decaying). Every strip gains the same amount of perceived brightness:
@@ -236,7 +238,7 @@ export class Road {
    * for all, a green strip pumped and bloomed while the purple one on the other side hardly changed.
    */
   setBeatPulse(k: number): void {
-    for (const n of this.neonMats) n.mat.color.copy(n.base).multiplyScalar(1 + n.gain * k);
+    for (const n of this.neonMats) n.mat.color.copy(n.base).multiplyScalar(this.beatSides === 1 && n.side > 0 ? 1 : 1 + n.gain * k);
   }
 
   constructor(track: LoopTrack, opts: { reflectionScale: number; style: RoadStyleParams; pillars: boolean }) {
@@ -313,7 +315,7 @@ export class Road {
     const neon = (c: THREE.Color, k: number) => {
       const m = applyAtmosphere(new THREE.MeshBasicMaterial({ color: c.clone().multiplyScalar(k), side: THREE.DoubleSide }));
       const lum = 0.2126 * m.color.r + 0.7152 * m.color.g + 0.0722 * m.color.b;
-      this.neonMats.push({ mat: m, base: m.color.clone(), gain: THREE.MathUtils.clamp(1.2 / Math.max(lum, 0.05), 0.75, 2.8) });
+      this.neonMats.push({ mat: m, base: m.color.clone(), gain: THREE.MathUtils.clamp(1.2 / Math.max(lum, 0.05), 0.75, 2.8), side: c === leftNeon ? -1 : c === rightNeon ? 1 : 0 });
       return m;
     };
     const solidWalls = wall === 'concrete' || wall === 'snowbank';

@@ -3,7 +3,6 @@ import { designs } from '../world/billboardArt';
 import { City } from '../world/City';
 import { createOcean } from '../world/coast/Coast';
 import { buildHarborYard } from '../world/props/HarborYard';
-import { createShips } from '../world/props/LevelProps';
 import { Terrain } from '../world/terrain/Terrain';
 import type { LevelDef } from './types';
 
@@ -54,11 +53,10 @@ export const harborDocks: LevelDef = {
     scene.add(terrain.mesh);
     scene.add(createOcean({ deep: '#03101e', shallow: '#0a2238', skyHorizon: '#3a2a30', level: 0, night: true }));
 
-    // The container terminal: stacks under floodlight masts, quay cranes unloading ships, yard cranes over the
+    // The container terminal: stacks under floodlight masts, big container ships loaded by quay cranes, yard cranes over the
     // rows, conveyor belts and robot carriers (see HarborYard.ts).
     const yard = buildHarborYard(track, rng, ctx.quality);
     scene.add(yard.group);
-    scene.add(createShips(yard.ships));
     ctx.onUpdate((time) => yard.update(time));
 
     // City skyline behind the docks.

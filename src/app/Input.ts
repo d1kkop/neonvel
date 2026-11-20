@@ -49,6 +49,7 @@ export class Input {
       throttle = Math.max(throttle, this.touch.throttle);
       brake = Math.max(brake, this.touch.brake);
       if (this.touch.steer) steer = this.touch.steer;
+      if (this.touch.handbrake) handbrake = 1;
     }
     this.state.throttle = throttle;
     this.state.brake = brake;

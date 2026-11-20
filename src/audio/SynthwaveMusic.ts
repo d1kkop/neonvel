@@ -220,6 +220,13 @@ export class Music {
     this.onChange?.(track.title);
   }
 
+  /** Stop whatever is playing (the audio system is being rebuilt). */
+  stopAll(): void {
+    this.player?.stop();
+    this.player = null;
+    this.currentId = '';
+  }
+
   /** The playing track's beat clock (null when its tempo is unknown). */
   get beat(): BeatClock | null {
     const p = this.player;
@@ -329,7 +336,7 @@ class SongPlayer {
     this.delaySend.connect(delay);
     delay.connect(dFilter).connect(fb).connect(delay);
     dFilter.connect(this.bus);
-    const reverb = makeReverb(ctx, 3.0, 3);
+    const reverb = makeReverb(ctx, 2.2, 3);
     this.reverbSend = ctx.createGain();
     this.reverbSend.gain.value = 0.6;
     this.reverbSend.connect(reverb).connect(this.bus);

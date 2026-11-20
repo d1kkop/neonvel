@@ -221,6 +221,8 @@ export interface CarOptions {
   tier?: 'free' | 'pro' | 'elite';
   /** Always use the procedural body (e.g. the space roadster, which removes its greenhouse). */
   procedural?: boolean;
+  /** Use the light body model (phones / weak GPUs / AI cars). */
+  lowDetail?: boolean;
 }
 
 export interface BuiltCar {
@@ -819,7 +821,7 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
   const doorR = Math.min(c0 + (c1 - c0) * 0.62, style.wheelT[1] - archT - 0.03);
   applyBodyDetail(bodyPaint, [c0 - 0.01, doorF, doorR, c1 < 0.95 ? c1 + 0.015 : 2], L, hwm, tier === 'free' ? 0.18 : 0.3, style.facet ?? 0.22);
   // Hand-modelled body (Blender .glb) when there is one; otherwise the procedural loft body + greenhouse.
-  const model = opts.procedural ? null : carModelFor(style.name);
+  const model = opts.procedural ? null : carModelFor(style.name, opts.lowDetail);
   // A complete model (Blender v2) has empties for its tail lights / exhausts and brings every detail itself.
   const full = !!model?.getObjectByName('tail_L');
   if (model && !full) {

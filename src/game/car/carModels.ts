@@ -10,6 +10,9 @@ const AVAILABLE = ['wedge', 'muscle', 'coupe', 'hatch', 'gt', 'razor', 'proto', 
 const STYLE_FOR: Record<string, string> = {}; // body style → model file (default: same name)
 
 const models = new Map<string, THREE.Object3D>();
+/** Light versions (`<style>_lo.glb`, about a third of the triangles): phones, weak GPUs, AI cars. */
+const lowModels = new Map<string, THREE.Object3D>();
+let loadingHigh: Promise<void> | null = null;
 /** Rim designs (tools/blender/rims.py): style → its meshes (one per material), modelled for RIM_MODEL_RADIUS. */
 const rims = new Map<string, THREE.Mesh[]>();
 /** Lip radius the rims were modelled at (the car builder scales them to its own rim radius). */
@@ -31,17 +34,26 @@ function dequantise(root: THREE.Object3D): void {
   });
 }
 
-/** Start (or join) loading every model. Resolves when all have loaded or failed. */
-export function preloadCarModels(): Promise<void> {
+/**
+ * Start (or join) loading the models. `withHigh` = also the full-detail bodies (not needed at low quality:
+ * phones then only download the light ones). Resolves when all have loaded or failed.
+ */
+export function preloadCarModels(withHigh = true): Promise<void> {
+  const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+  const base = import.meta.env.BASE_URL;
+  if (withHigh && !loadingHigh) {
+    loadingHigh = Promise.all(AVAILABLE.map((name) =>
+      loader.loadAsync(`${base}models/cars/${name}.glb`)
+        .then((g) => { dequantise(g.scene); models.set(name, g.scene); })
+        .catch(() => undefined))).then(() => undefined);
+  }
   if (!loading) {
-    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-    const base = import.meta.env.BASE_URL;
     loading = Promise.all(
       AVAILABLE.map((name) =>
-        loader.loadAsync(`${base}models/cars/${name}.glb`)
+        loader.loadAsync(`${base}models/cars/${name}_lo.glb`)
           .then((g) => {
             dequantise(g.scene); // so the car builder can merge them with its own procedural parts
-            models.set(name, g.scene);
+            lowModels.set(name, g.scene);
           })
           .catch(() => undefined), // fall back to the procedural body
       ).concat(
@@ -67,12 +79,13 @@ export function preloadCarModels(): Promise<void> {
       ),
     ).then(() => undefined);
   }
-  return loading;
+  return withHigh ? Promise.all([loading, loadingHigh]).then(() => undefined) : loading;
 }
 
-/** A fresh copy of the model for a body style, or null when there is none (yet). */
-export function carModelFor(styleName: string): THREE.Object3D | null {
-  const m = models.get(STYLE_FOR[styleName] ?? styleName);
+/** A fresh copy of the model for a body style (`low` = the light version), or null when there is none (yet). */
+export function carModelFor(styleName: string, low = false): THREE.Object3D | null {
+  const key = STYLE_FOR[styleName] ?? styleName;
+  const m = low ? lowModels.get(key) ?? models.get(key) : models.get(key) ?? lowModels.get(key);
   return m ? m.clone(true) : null;
 }
 

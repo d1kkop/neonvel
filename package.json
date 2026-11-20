@@ -7,7 +7,10 @@
     "dev": "vite --host",
     "build": "tsc && vite build",
     "preview": "vite preview --host",
-    "server": "node server/index.ts"
+    "server": "wrangler d1 migrations apply neon-velocity --local -c cloud/wrangler.jsonc && wrangler dev -c cloud/wrangler.jsonc",
+    "server:node": "node --env-file-if-exists=server/.env server/index.ts",
+    "deploy": "npm run build && wrangler d1 migrations apply neon-velocity --remote -c cloud/wrangler.jsonc && wrangler deploy -c cloud/wrangler.jsonc",
+    "typecheck:cloud": "tsc --noEmit -p cloud"
   },
   "dependencies": {
     "lil-gui": "^0.21.0",
@@ -15,10 +18,12 @@
     "ws": "^8.23.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261119.1",
     "@types/node": "^26.6.6",
     "@types/three": "^0.187.0",
     "@types/ws": "^8.18.2",
     "typescript": "^7.0.2",
-    "vite": "^8.3.8"
+    "vite": "^8.3.8",
+    "wrangler": "^4.165.0"
   }
 }

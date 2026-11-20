@@ -6,6 +6,11 @@ import type { AiDifficulty } from '../game/CarPhysics';
 export interface Settings {
   playerName: string;
   quality: Quality;
+  /** Pick the graphics quality from the detected GPU (on until the player picks one by hand). */
+  qualityAuto?: boolean;
+  /** Phone / tablet controls: on-screen ◀ ▶ buttons, steering stick, or tilt; autoGas = always on the throttle unless braking. */
+  touchControls?: 'buttons' | 'stick' | 'tilt';
+  autoGas?: boolean;
   volume: { master: number; music: number; sfx: number; ambience: number };
   /** Selected garage car + per-car paint choice. */
   carId: string;
@@ -30,6 +35,8 @@ export interface Settings {
   opponents: number;
   /** Quick Race game mode. */
   mode: 'race' | 'highway';
+  /** Neon strips that pulse to the music: 1 = one side of the road, 2 = both sides. */
+  beatSides: 1 | 2;
   /** Overall lighting / glow, 0.5 (toned down) .. 1 (as designed). */
   lighting: number;
   /** VHS look (scanlines, tape wobble). */
@@ -38,7 +45,8 @@ export interface Settings {
   difficulty: AiDifficulty;
   /** Netplay: seconds to wait for a full 4-driver lobby before racing with fewer. */
   matchWait: 15 | 30 | 45;
-  serverUrl: string;
+  /** Session token from signing in with Google / Discord (empty = signed out). */
+  authToken: string;
   /** Local cache of the online profile (server is authoritative). */
   rating: number;
   games: number;
@@ -51,6 +59,7 @@ const KEY = 'neon-velocity-settings-v1';
 const DEFAULTS: Settings = {
   playerName: '',
   quality: 'high',
+  qualityAuto: true,
   volume: { master: 0.8, music: 0.8, sfx: 0.45, ambience: 0.12 },
   carId: 'vortex',
   carPaint: {},
@@ -67,13 +76,14 @@ const DEFAULTS: Settings = {
   opponents: 3,
   mode: 'race',
   lighting: 1,
+  beatSides: 1,
   vhs: false, // optional (Options → VHS look)
   difficulty: 'normal',
   matchWait: 30,
-  serverUrl: `ws://${location.hostname || 'localhost'}:8787`,
+  authToken: '',
   rating: START_RATING,
   games: 0,
-  version: 5,
+  version: 6,
 };
 
 export function loadSettings(): Settings {
@@ -109,6 +119,11 @@ export function loadSettings(): Settings {
       if (s.version < 5) {
         s.vhs = false;
         s.version = 5;
+      }
+      // v6: smoothed corners + new handling: old personal lap bests can't be compared any more.
+      if (s.version < 6) {
+        s.bestLaps = {};
+        s.version = 6;
       }
       return s;
     }

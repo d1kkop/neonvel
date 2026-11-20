@@ -13,11 +13,13 @@ import { levelById } from '../levels';
 import type { LevelDef } from '../levels/types';
 import { NetClient, NetPlayer, ServerMsg } from '../net/NetClient';
 import { Store } from '../net/Store';
+import { serverUrl } from '../net/serverUrl';
 import { ENGINES } from '../audio/engineProfiles';
-import { LEVEL_NAMES, levelItem, levelPrice } from '../game/products';
+import { LEVEL_NAMES, UNLOCK_ALL, levelItem, levelPrice } from '../game/products';
 import { carById, formatPrice, specFor } from '../game/car/catalog';
 import type { CarSetup } from '../game/World';
 import { isMobile, Mirror, Renderer } from '../render/Renderer';
+import { detectGpu } from '../render/gpuTier';
 import { makeFrame } from '../track/Track';
 import type { WeatherName } from '../world/weather/Weather';
 import { formatTime, Hud } from './Hud';
@@ -80,7 +82,7 @@ export class App {
     this.chase = new ChaseCamera(this.camera);
     this.orbit = new OrbitControls(this.camera, this.renderer.webgl.domElement);
     this.orbit.enabled = false;
-    this.net = new NetClient(this.settings.serverUrl);
+    this.net = new NetClient(serverUrl());
     this.net.onMessage = (m) => this.onNet(m);
 
     this.menu = new Menu(this.settings, {
@@ -88,7 +90,11 @@ export class App {
       findMatch: () => void this.findMatch(),
       cancelMatch: () => this.cancelMatch(),
       refreshLeaderboard: () => void this.refreshLeaderboard(),
-      lapBoard: (level) => this.store.lapBoard(level, this.settings.playerName),
+      lapBoard: (level) => this.store.lapBoard(level, this.settings.authToken),
+      signIn: (provider, devName) => this.store.signIn(provider, devName),
+      signOut: () => void this.signOut(),
+      rename: (name) => this.rename(name),
+      providers: () => this.store.providers(),
       resume: () => this.resume(),
       restart: () => (this.online || this.lastWasOnline ? void this.findMatch(true) : this.startRace()),
       quitToMenu: () => this.toMenu(),
@@ -119,6 +125,19 @@ export class App {
       }),
     });
     this.hud = new Hud(this.menu.root);
+    this.hud.setTouchMode(this.settings.touchControls ?? 'buttons', this.settings.autoGas !== false);
+    // Phones: the first tap goes full screen and locks landscape (Android / Chrome; on iPhone that needs
+    // "Add to Home Screen", which opens the game full screen from the manifest).
+    if (isMobile) {
+      const goFull = () => {
+        const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+        if (!document.fullscreenElement) {
+          const p = el.requestFullscreen?.({ navigationUI: 'hide' }) ?? el.webkitRequestFullscreen?.();
+          void Promise.resolve(p).then(() => (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape')).catch(() => undefined);
+        }
+      };
+      window.addEventListener('pointerup', goFull, { once: true });
+    }
     this.camera.layers.enable(1);
     this.camera.layers.enable(2);
     this.mirror.camera.layers.enable(1);
@@ -158,12 +177,15 @@ export class App {
       if (p?.buttons[9]?.pressed && (this.state === 'racing' || this.state === 'countdown') && !this.paused) this.pause();
     }, 100);
 
-    this.loadMenuWorld(levelById(MENU_LEVEL), true);
     this.menu.show('main');
-    // Hand-modelled car bodies (small .glb files): once loaded, rebuild the title background with them.
-    void preloadCarModels().then(() => {
-      if (this.state === 'menu' && this.onTitle && this.world) this.loadMenuWorld(levelById(MENU_LEVEL), true);
+    // Title background: built once, with the hand-modelled cars (waits up to 3 s for those small .glb files).
+    // Building it first and again when the models arrived gave a big hitch a few seconds in (worst on phones).
+    void Promise.race([preloadCarModels(this.settings.quality !== 'low'), new Promise((r) => window.setTimeout(r, 3000))]).then(() => {
+      this.bootDone = true;
+      if (this.state === 'menu' && !this.world) this.loadMenuWorld(levelById(MENU_LEVEL), true);
     });
+    // Returning from a Google / Discord sign-in?
+    void this.takeSignIn();
     // Returning from Stripe Checkout?
     void this.store.confirmFromUrl().then((r) => {
       if (!r) return;
@@ -207,8 +229,15 @@ export class App {
     };
     // Only while you drive: the menu's attract camera and the free camera stay steady.
     w.onShake = (amount) => { if (this.state === 'racing' && !this.freeCam) this.chase.shake(amount); };
+    w.onHit = (label) => {
+      if (this.state !== 'racing') return;
+      this.hud.beatPop(label, false);
+      this.audio.sfx?.impact(0.45);
+      if (!this.freeCam) this.chase.shake(0.4);
+    };
     this.renderer.setScene(w.scene, this.camera);
     this.world = w;
+    w.road.beatSides = this.settings.beatSides ?? 1;
     // The chase camera sits further back / higher for long vehicles (the 3 m tall bus: well above the roof).
     const len = w.player.car.style.length;
     const k = Math.max(1, len / 4.6);
@@ -285,6 +314,14 @@ export class App {
     this.audio.setEngine(false);
     this.hud.show(false);
     this.updateNowPlaying();
+    // Compile the shaders in the background before the first frame of this world (like startRace): a normal
+    // first frame compiles them one by one on the main thread and froze the title screen for seconds on a
+    // first visit (worst on phones). Until then the canvas keeps its last picture; the menus stay usable.
+    w.placeCars(0);
+    this.compiling = true;
+    void this.renderer.precompile(w.scene, this.camera).catch(() => undefined).finally(() => {
+      if (this.world === w) this.compiling = false;
+    });
   }
 
   private previewTimer = 0;
@@ -292,8 +329,14 @@ export class App {
   /** Debounced background-level preview (rebuilding a level is heavy; avoid doing it twice quickly). */
   private menuWeather: string | null = null;
 
+  /** False until the first title background is built (menus asking for a background wait for it). */
+  private bootDone = false;
+
   private previewLevel(level: LevelDef, title = false): void {
     window.clearTimeout(this.previewTimer);
+    if (!this.bootDone) return;
+    // A locked level is never loaded (not even as the menu background) until it is bought.
+    if (!title && !this.isLevelOwned(level.id)) return;
     const weather = title ? level.defaultWeather : this.raceWeather(level);
     if (this.world?.level.id === level.id && this.menuWeather === `${weather}|${!title && this.raceFog(level)}`) return;
     this.previewTimer = window.setTimeout(() => {
@@ -316,7 +359,7 @@ export class App {
     this.paused = false;
     // Let the loading screen paint before the (synchronous) level build.
     window.setTimeout(async () => {
-      await preloadCarModels(); // usually done long before (loaded at startup)
+      await preloadCarModels(this.settings.quality !== 'low'); // usually done long before (loaded at startup)
       const modeId = this.settings.mode ?? 'race';
       const w = this.buildWorld(level, weather, modeId === 'race' ? this.settings.opponents : 0);
       w.weather.setFog(this.raceFog(level), true);
@@ -337,6 +380,7 @@ export class App {
       this.laps = modeId === 'race' ? (this.settings.lapsByLevel?.[w.level.id] ?? defaultLaps(w.level.id)) : Infinity;
       this.mode = modeId === 'highway' ? new HighwayMode() : null;
       this.mode?.start(w);
+      this.startTiming(w.level.id, this.isOwned(this.settings.carId) ? this.settings.carId : 'vortex');
       this.lastLap = 1;
       this.lapStart = 0;
       this.bestLap = Infinity;
@@ -423,6 +467,7 @@ export class App {
       }
       if (this.countdown <= 0) {
         this.state = 'racing';
+        if (this.settings.authToken && this.net.connected && !this.mode) this.net.send({ t: 'lapstart' });
         this.hud.setCountdown('GO!');
         this.audio.sfx?.countdown(0);
         window.setTimeout(() => this.hud.setCountdown(null), 700);
@@ -485,7 +530,11 @@ export class App {
         const lapTime = this.raceTime - this.lapStart;
         this.bestLap = Math.min(this.bestLap, lapTime);
         this.lapStart = this.raceTime;
-        if (!this.mode) this.recordLap(w.level.id, lapTime);
+        if (!this.mode) {
+          this.recordLap(w.level.id, lapTime);
+          // The track boards take this time once the server has checked the lap was possible.
+          if (this.settings.authToken && this.net.connected) this.net.send({ t: 'lapdone', lap: lap - 1, ms: Math.round(lapTime * 1000) });
+        }
       }
       this.lastLap = lap;
       if (lap === this.laps) this.hud.message('FINAL LAP!');
@@ -498,10 +547,7 @@ export class App {
     }
   }
 
-  /**
-   * A lap was completed in a race (single lap, whichever lap of the race it was). A new personal best is kept
-   * locally and sent to the server's track board (needs a driver name).
-   */
+  /** A lap was completed in a race: a new personal best is shown and kept locally. */
   private recordLap(levelId: string, seconds: number): void {
     const ms = Math.round(seconds * 1000);
     const prev = this.settings.bestLaps[levelId];
@@ -509,9 +555,77 @@ export class App {
     this.settings.bestLaps[levelId] = ms;
     saveSettings(this.settings);
     this.hud.beatPop(`BEST LAP ${formatTime(seconds)}`, true);
-    if (!this.settings.playerName) return;
-    void this.store.submitLap(this.settings.playerName, levelId, ms, this.settings.carId).then((r) => {
-      if (r?.improved && r.rank) this.menu.toast(`Track record board: you are #${r.rank} on ${LEVEL_NAMES[levelId] ?? levelId}`);
+  }
+
+  // --------------------------------------------------------------- accounts
+
+  /** Back from Google / Discord: the session token comes in the address (#auth=…); keep it, clean the address. */
+  private async takeSignIn(): Promise<void> {
+    const h = window.location.hash;
+    const tok = /[#&]auth=([\w-]+)/.exec(h)?.[1];
+    const err = /[#&]autherror=([^&]+)/.exec(h)?.[1];
+    if (tok || err) history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (err) this.menu.toast(decodeURIComponent(err));
+    if (tok) this.settings.authToken = tok;
+    if (!this.settings.authToken) { this.menu.refreshAccount(); return; }
+    // (The page is busy building its first 3D scene right now: allow time, and try again if it is offline.)
+    let me = await this.store.me(this.settings.authToken);
+    for (let i = 0; i < 3 && me === undefined; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      me = await this.store.me(this.settings.authToken);
+    }
+    if (me === null) this.settings.authToken = ''; // signed out elsewhere / expired
+    else if (me) {
+      this.settings.playerName = me.name;
+      this.settings.rating = me.rating;
+      this.settings.games = me.games;
+      this.settings.ownedCars = me.owned;
+      if (tok) this.menu.toast(`Signed in as ${me.name}`);
+    }
+    saveSettings(this.settings);
+    this.menu.refreshAccount();
+  }
+
+  private async signOut(): Promise<void> {
+    await this.store.signOut(this.settings.authToken);
+    this.settings.authToken = '';
+    this.settings.ownedCars = [];
+    saveSettings(this.settings);
+    this.net.close();
+    this.menu.refreshAccount();
+    this.menu.toast('Signed out');
+  }
+
+  private async rename(name: string): Promise<string | null> {
+    const r = await this.store.rename(this.settings.authToken, name);
+    if (r.error) return r.error;
+    this.settings.playerName = r.name ?? name;
+    saveSettings(this.settings);
+    return null;
+  }
+
+  // ------------------------------------------------------------ server lap timing
+
+  private timingTimer = 0;
+
+  /**
+   * Quick race, signed in: report the car's distance along the track ten times a second, so the server can
+   * check each lap (every step possible, the lap time matching its own clock) before it goes on the track board.
+   */
+  private startTiming(levelId: string, carId: string): void {
+    window.clearInterval(this.timingTimer);
+    if (!this.settings.authToken || this.online || this.mode) return;
+    void this.ensureOnline().then((ok) => {
+      if (!ok) return;
+      this.net.send({ t: 'timing', level: levelId, car: carId });
+      this.timingTimer = window.setInterval(() => {
+        const w = this.world;
+        if (!w || w.level.id !== levelId || this.state === 'menu' || this.paused) {
+          if (!w || w.level.id !== levelId || this.state === 'menu') window.clearInterval(this.timingTimer);
+          return;
+        }
+        if (this.state === 'racing') this.net.send({ t: 'tt', s: +w.player.phys.s.toFixed(2), v: +w.player.phys.v.toFixed(2) });
+      }, 100);
     });
   }
 
@@ -572,7 +686,7 @@ export class App {
     const p = w.player;
 
     if (this.state === 'menu' || this.state === 'loading') {
-      this.attractCamera(w, dt);
+      this.attractCamera(w, dt, this.paused ? 1 : alpha);
     } else if (this.freeCam) {
       if (!this.orbit.enabled) {
         this.orbit.enabled = true;
@@ -644,7 +758,7 @@ export class App {
   private vehScale = 1;
 
   /** Cinematic menu camera: cycles through a few shots around the leading car. */
-  private attractCamera(w: World, dt: number): void {
+  private attractCamera(w: World, dt: number, alpha = 1): void {
     this.shotTimer += dt;
     if (this.shotTimer > 7) {
       this.shotTimer = 0;
@@ -653,22 +767,26 @@ export class App {
     const p = w.player;
     const pos = p.car.group.position;
     const t = this.shotTimer;
+    // The car is drawn between two physics steps (alpha); the camera must use that same in-between position,
+    // or it runs a step ahead / behind the car at frame rates other than the physics rate (stutter on phones).
+    const ps = p.phys.ps + (p.phys.s - p.phys.ps) * alpha;
+    const px = p.phys.px + (p.phys.x - p.phys.px) * alpha;
     const cam = this.camera;
     const track = w.track;
     const hw = track.width / 2;
     // Near a tunnel/canopy the shots are pulled inside the walls and under the roof (blended, no jump).
-    const covered = !!track.sectionAt(p.phys.s, 30);
+    const covered = !!track.sectionAt(ps, 30);
     this.coverBlend += ((covered ? 1 : 0) - this.coverBlend) * (1 - Math.exp(-dt * 4));
     const k = this.coverBlend;
     /** Camera at sOff metres along the track from the car, lat metres beside it, h above the road. */
     const camAt = (sOff: number, lat: number, h: number) => {
-      track.frameAt(p.phys.s + sOff, this.frame);
+      track.frameAt(ps + sOff, this.frame);
       const room = hw - 1.6;
-      const L = THREE.MathUtils.lerp(p.phys.x + lat, THREE.MathUtils.clamp(p.phys.x + lat, -room, room), k);
+      const L = THREE.MathUtils.lerp(px + lat, THREE.MathUtils.clamp(px + lat, -room, room), k);
       cam.position.copy(this.frame.position).addScaledVector(this.frame.right, L);
       cam.position.y += THREE.MathUtils.lerp(h, Math.min(h, 4.8), k);
     };
-    w.track.frameAt(p.phys.s, this.frame);
+    w.track.frameAt(ps, this.frame);
     const f = this.frame.forward;
     // Buses: every shot further out and above the roofs, so it never ends up inside one of the other buses.
     const vs = this.vehScale;
@@ -678,7 +796,7 @@ export class App {
       cam.lookAt(pos.x, pos.y + 0.8 * vs, pos.z);
     } else if (this.shot === 1) {
       // Side shot from whichever side has more room (inside a tunnel the far wall is close).
-      const side = k > 0.5 ? (p.phys.x > 0 ? -1 : 1) : -1;
+      const side = k > 0.5 ? (px > 0 ? -1 : 1) : -1;
       const fx = f.x, fz = f.z;
       camAt((-3 + t * 0.6) * vs, side * 9 * Math.pow(vs, 0.7), 2.2 + up);
       cam.lookAt(pos.x + fx * 6 * vs, pos.y + 0.8 * vs, pos.z + fz * 6 * vs);
@@ -698,21 +816,29 @@ export class App {
   // ------------------------------------------------------------- settings
 
   private applyQuality(): void {
+    if (this.settings.qualityAuto !== false) this.settings.quality = detectGpu().tier;
     const q = this.settings.quality;
     const dpr = window.devicePixelRatio;
     // High supersamples (at least 1.5x, up to 2x) so fine shader detail stays crisp instead of shimmering.
-    const ratio = q === 'low' ? Math.min(dpr, 1) * 0.75 : q === 'medium' ? Math.min(dpr, 1.25) : isMobile ? Math.min(dpr, 1.5) : Math.min(Math.max(dpr, 1.5), 2);
+    // Phones start at 1x and may climb to their sharp native-ish resolution while they keep 60 fps (the dynamic
+    // resolution steps back down when the frame rate drops). Weak desktop GPUs start low.
+    const ratio = isMobile ? Math.min(dpr, q === 'high' ? 1.5 : 1) : q === 'low' ? Math.min(dpr, 1) * 0.75 : q === 'medium' ? Math.min(dpr, 1.25) : Math.min(Math.max(dpr, 1.5), 2);
+    const maxRatio = isMobile ? dpr : ratio; // phones may go up to their full native resolution
+    // Dynamic resolution: weak hardware may go well below 1x to hold the frame rate.
+    this.renderer.setRatioRange(q === 'low' ? 0.5 : q === 'medium' ? 0.7 : 1, maxRatio);
+    // Phones: as sharp as possible while the game stays above 30 fps.
+    this.renderer.setMinFps(isMobile ? 30 : 42);
     if (Math.abs(this.renderer.webgl.getPixelRatio() - ratio) > 0.01) {
       this.renderer.webgl.setPixelRatio(ratio);
       this.renderer.resize();
     }
   }
 
-  private readonly store = new Store(loadSettings().serverUrl);
+  private readonly store = new Store();
 
   /** Cars the player can drive: all free ones + purchased ones. */
   private isOwned(id: string): boolean {
-    return carById(id).price === 0 || this.settings.ownedCars.includes(id);
+    return UNLOCK_ALL || carById(id).price === 0 || this.settings.ownedCars.includes(id);
   }
 
   private playerCarSetup(): CarSetup {
@@ -730,7 +856,7 @@ export class App {
   }
 
   private async refreshOwned(): Promise<void> {
-    const list = await this.store.owned(this.settings.playerName);
+    const list = await this.store.owned(this.settings.authToken);
     if (list) {
       this.settings.ownedCars = list;
       saveSettings(this.settings);
@@ -740,7 +866,7 @@ export class App {
   }
 
   private isLevelOwned(id: string): boolean {
-    return levelPrice(id) === 0 || this.settings.ownedCars.includes(levelItem(id));
+    return UNLOCK_ALL || levelPrice(id) === 0 || this.settings.ownedCars.includes(levelItem(id));
   }
 
   /** Buy a car (id) or a level (`level:<id>`). */
@@ -749,12 +875,12 @@ export class App {
     const lid = id.slice(6);
     const m = isLevel ? { name: LEVEL_NAMES[lid] ?? lid, price: levelPrice(lid) } : carById(id);
     const status = (t: string) => (isLevel ? this.menu.toast(t) : this.menu.setGarageStatus(t));
-    if (!this.settings.playerName) {
-      status('Purchases are linked to your driver name — set one on the Netplay screen first.');
+    if (!this.settings.authToken) {
+      status('Sign in with Google or Discord first (Netplay screen): purchases belong to your account.');
       return;
     }
     status(`Starting purchase of ${m.name} (${formatPrice(m.price)})…`);
-    const r = await this.store.buy(this.settings.playerName, id);
+    const r = await this.store.buy(this.settings.authToken, id);
     if (r.redirected) return; // off to Stripe Checkout
     if (r.error) {
       status(r.error);
@@ -909,6 +1035,7 @@ export class App {
   }
 
   private applySettings(): void {
+    this.hud.setTouchMode(this.settings.touchControls ?? 'buttons', this.settings.autoGas !== false);
     if (this.world) {
       this.applyAmbience();
       this.applyMusic();
@@ -920,8 +1047,8 @@ export class App {
     this.audio.setVolume('ambience', v.ambience);
     this.applyQuality();
     this.renderer.lighting = Math.min(1, Math.max(0.5, this.settings.lighting ?? 1));
-    this.net.setUrl(this.settings.serverUrl);
-    this.store.setServer(this.settings.serverUrl);
+    if (this.world) this.world.road.beatSides = this.settings.beatSides ?? 1;
+
   }
 
   private layoutMirror(): void {
@@ -958,7 +1085,7 @@ export class App {
   private async ensureOnline(): Promise<boolean> {
     try {
       await this.net.connect();
-      this.net.send({ t: 'hello', name: this.settings.playerName || 'Guest' });
+      this.net.send({ t: 'hello', token: this.settings.authToken });
       return true;
     } catch {
       return false;
@@ -1030,6 +1157,9 @@ export class App {
     if (o.finishedSent) return;
     o.finishedSent = true;
     this.state = 'finished';
+    // One last position report across the line first: the server times the final lap from these reports.
+    const ph = this.world?.player.phys;
+    if (ph) this.net.send({ t: 'state', s: { s: ph.s, x: ph.x, psi: ph.psi, phi: ph.phi, v: ph.v, steer: ph.steer, drift: ph.driftAngle, b: ph.boosting ? 1 : 0 } });
     this.net.send({ t: 'finish', time: this.raceTime });
     this.audio.ui?.fanfare(true);
     this.hud.message(`FINISHED ${formatTime(this.raceTime)} — waiting for the others…`, 60);
@@ -1073,7 +1203,7 @@ export class App {
     }
     this.menu.setNetStatus('Connecting to server…', true);
     if (!(await this.ensureOnline())) {
-      this.menu.setNetStatus(`Server offline (${this.settings.serverUrl}). Start it with "npm run server".`);
+      this.menu.setNetStatus('Game server offline — try again in a moment.');
       return;
     }
     const carId = this.isOwned(this.settings.carId) ? this.settings.carId : 'vortex';
@@ -1097,6 +1227,7 @@ export class App {
     switch (m.t) {
       case 'welcome':
         if (m.owned) this.settings.ownedCars = m.owned;
+        this.settings.playerName = m.name;
         this.settings.rating = m.rating;
         this.settings.games = m.games;
         saveSettings(this.settings);
@@ -1142,7 +1273,12 @@ ${plan}`, true);
         this.menu.setLeaderboard(NetClient.toRows(m.rows, this.settings.playerName));
         break;
       case 'error':
+        if (m.code === 'auth') { this.settings.authToken = ''; saveSettings(this.settings); this.menu.refreshAccount(); }
         this.menu.setNetStatus(m.message);
+        break;
+      case 'lap':
+        if (m.rejected) this.menu.toast(`Lap not counted for the track board: ${m.rejected}`);
+        else if (m.improved && m.rank) this.menu.toast(`New track record for you: ${formatTime(m.ms / 1000)} — #${m.rank} on ${LEVEL_NAMES[m.level] ?? m.level}`);
         break;
       case 'warn':
         this.hud.message(m.message, 4);

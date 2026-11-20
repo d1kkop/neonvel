@@ -180,24 +180,28 @@ export interface SnakePole {
   other?: { x: number; y: number; z: number; s: number };
 }
 
-const JUMP_TIME = 1.25;
+const JUMP_TIME = 0.95;
+/** How far the head can reach from the post (m) when it strikes. */
+const STRIKE_REACH = 6.2;
 
 /**
  * Rattlesnakes coiled round lamp posts. Each one hangs there with its head swaying off the post; when the
  * player comes close it strikes: the front of the body whips off the post straight at the car, mouth first,
  * with a hiss, then draws back. Sometimes, instead, it lets go and leaps right across the road in front of the
- * car to the lamp post on the other side, uncoiling in the air and winding itself round the new post.
+ * car to the nearest lamp post on the other side, uncoiling in the air and winding itself round the new post.
  * (It cannot reach or hurt the car.)
  */
 export class PoleSnakes {
   readonly group = new THREE.Group();
-  private readonly list: { mesh: THREE.Mesh; u: { uLunge: THREE.IUniform; uTarget: THREE.IUniform; uJump: THREE.IUniform; uDest: THREE.IUniform }; pole: SnakePole; t: number; armed: boolean; jumping: boolean; strikeAt: number }[] = [];
+  private readonly list: { mesh: THREE.Mesh; u: { uLunge: THREE.IUniform; uTarget: THREE.IUniform; uJump: THREE.IUniform; uDest: THREE.IUniform }; pole: SnakePole; t: number; armed: boolean; jumping: boolean; strikeAt: number; bit: boolean }[] = [];
   private readonly v = new THREE.Vector3();
 
   /** `onHiss` fires at the start of every strike. */
   constructor(poles: SnakePole[], private readonly trackLength: number, private readonly onHiss?: () => void,
     /** Chance that it leaps to the other post instead of striking. */
-    private readonly jumpChance = 0.4) {
+    private readonly jumpChance = 0.5,
+    /** Called when a strike reaches the car (the level slows the car down). */
+    private readonly onBite?: () => void) {
     this.group.name = 'pole-snakes';
     const rings = 110, around = 10;
     const pos: number[] = [], idx: number[] = [];
@@ -221,7 +225,7 @@ export class PoleSnakes {
           uniform float uTime, uLunge, uPh, uJump; uniform vec3 uTarget, uDest;
           varying vec3 vN; varying vec3 vW; varying vec2 vSkin; varying float vMouth;
           const float R = 0.27;          // coil radius (the post is 0.25 m square)
-          const float FREE = 0.4;        // the front 40 % of the body can leave the post
+          const float FREE = 0.55;       // the front 55 % of the body can leave the post
           vec3 coil(float s) {
             float a = (1.0 - s) * 25.0 + uPh;                       // four turns
             return vec3(cos(a) * R, 1.3 + (1.0 - s) * 2.7, sin(a) * R);
@@ -247,7 +251,7 @@ export class PoleSnakes {
             float air = sin(tj * 3.1416);
             vec3 axis = vec3(0.0, c.y, 0.0);
             vec3 wound = mix(c, axis, air);                         // coil radius shrinks to nothing mid-air
-            vec3 p = wound + uDest * tj + vec3(0.0, 4.2 * air, 0.0);
+            vec3 p = wound + uDest * tj + vec3(0.0, 1.6 * air - 0.9 * tj, 0.0);        // a low, flat leap: right across the windscreen
             // A slow writhe in the air.
             vec3 across = normalize(vec3(-uDest.z, 0.0, uDest.x) + 1e-4);
             p += across * 0.5 * air * sin(s * 9.0 + uTime * 9.0);
@@ -260,6 +264,7 @@ export class PoleSnakes {
             float prof = mix(1.0, 1.55 + 0.35 * uLunge, head) * mix(0.82, 1.0, smoothstep(0.045, 0.14, s)) * (1.0 - 0.8 * smoothstep(0.6, 1.0, s));
             prof *= smoothstep(0.0, 0.01, s) * 0.5 + 0.5;
             prof *= step(s, 0.999);
+            prof *= 1.0 + 0.7 * sin(clamp(uJump, 0.0, 1.0) * 3.1416);   // puffed up in the air (reads at speed)
             vec3 c = spine(s);
             vec3 fwd = normalize(spine(max(s - 0.008, 0.0)) - spine(s + 0.008));
             vec3 side = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)) + 1e-4);
@@ -281,29 +286,53 @@ export class PoleSnakes {
           ${LIGHT_GLSL}
           void main() {
             float s = vSkin.y;
+            // Scales: overlapping rows (every other row shifted half a scale), each a little dome. Bump-mapped,
+            // so every scale catches its own highlight.
+            vec2 sc = vec2(vSkin.x * 7.0, s * 150.0);
+            float row = floor(sc.y);
+            sc.x += mod(row, 2.0) * 0.5;
+            vec2 cell = fract(sc) - 0.5;
+            float dome = 1.0 - smoothstep(0.15, 0.55, length(cell * vec2(1.0, 1.3)));
+            float fw = length(fwidth(sc));
+            dome = mix(dome, 0.5, smoothstep(0.3, 0.9, fw));         // fade the scales out far away
+            vec3 nn = normalize(vN);
+            {
+              vec3 dpx = dFdx(vW), dpy = dFdy(vW);
+              vec3 r1 = cross(dpy, nn), r2 = cross(nn, dpx);
+              float det = dot(dpx, r1);
+              vec2 dh = vec2(dFdx(dome), dFdy(dome)) * 0.012;
+              nn = normalize(abs(det) * nn - sign(det) * (dh.x * r1 + dh.y * r2));
+            }
             float top = smoothstep(-0.3, 0.6, sin(vSkin.x));
             float u = fract(s * 34.0) - 0.5;
             float v = (vSkin.x - 1.5708) / 1.2;
             float dia = abs(u) * 2.0 + abs(v);
-            vec3 sand = vec3(0.62, 0.47, 0.28), dark = vec3(0.2, 0.12, 0.07), pale = vec3(0.86, 0.76, 0.56);
+            vec3 sand = vec3(0.58, 0.42, 0.22), dark = vec3(0.13, 0.07, 0.04), pale = vec3(0.92, 0.82, 0.58), rust = vec3(0.5, 0.22, 0.1);
             vec3 col = mix(sand, pale, smoothstep(1.05, 0.95, dia) * top);
-            col = mix(col, dark, smoothstep(0.85, 0.75, dia) * top);
-            col = mix(pale * 0.9, col, top);
+            col = mix(col, mix(dark, rust, 0.35 + 0.35 * sin(s * 40.0)), smoothstep(0.85, 0.72, dia) * top);
+            col = mix(pale * 0.85, col, top);
             float rattle = smoothstep(0.94, 0.96, s);
             col = mix(col, vec3(0.8, 0.7, 0.5) * (0.7 + 0.3 * step(0.5, fract(s * 120.0))), rattle);
             // Eyes (two bright dots on top of the head) and the pink inside of the open mouth.
             float eye = (1.0 - smoothstep(0.004, 0.007, abs(s - 0.02))) * (1.0 - smoothstep(0.1, 0.16, abs(abs(vSkin.x - 1.5708) - 0.75)));
             col = mix(col, vec3(1.0, 0.75, 0.1) * 2.0, eye);
             col = mix(col, vec3(0.95, 0.35, 0.4), vMouth * 0.85);
-            col *= 0.9 + 0.1 * sin(s * 520.0) * sin(vSkin.x * 14.0);
-            gl_FragColor = vec4(applyAtmos(desertLit(col, normalize(vN), vW, 0.5), vW), 1.0);
+            col *= 0.82 + 0.25 * dome;                                // scale edges darker
+            // Glossy: a tight bright highlight on every scale plus a broad sheen, and a cool rim from the sky.
+            vec3 L = normalize(uMoonDir), V = normalize(cameraPosition - vW);
+            vec3 H = normalize(L + V);
+            float nh = max(dot(nn, H), 0.0);
+            float spec = pow(nh, 90.0) * 1.8 + pow(nh, 18.0) * 0.22;
+            float fres = pow(1.0 - max(dot(nn, V), 0.0), 4.0);
+            vec3 lit = desertLit(col, nn, vW, 0.0) + vec3(1.0, 0.9, 0.75) * spec * (0.5 + 0.5 * dome) + vec3(0.55, 0.5, 0.75) * fres * 0.35;
+            gl_FragColor = vec4(applyAtmos(lit, vW), 1.0);
           }`,
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(pole.x, pole.y, pole.z);
       mesh.frustumCulled = false;
       this.group.add(mesh);
-      this.list.push({ mesh, u: { uLunge, uTarget, uJump, uDest }, pole, t: 99, armed: true, jumping: false, strikeAt: 0 });
+      this.list.push({ mesh, u: { uLunge, uTarget, uJump, uDest }, pole, t: 99, armed: true, jumping: false, strikeAt: 0, bit: true });
     });
   }
 
@@ -319,7 +348,8 @@ export class PoleSnakes {
       const anchorY = 2.9;
       this.v.y -= anchorY;
       const len = this.v.length();
-      if (len > 3.3) this.v.multiplyScalar(3.3 / len);
+      const inReach = len <= STRIKE_REACH;
+      if (len > STRIKE_REACH) this.v.multiplyScalar(STRIKE_REACH / len);
       this.v.y += anchorY;
       (sn.u.uTarget.value as THREE.Vector3).copy(this.v);
       if (sn.jumping) {
@@ -336,23 +366,30 @@ export class PoleSnakes {
         }
         continue;
       }
-      // It decides once per pass, when the car is about a second and a half away: leap or strike.
-      const lead = Math.max(34, speed * 1.4);
+      // It decides once per pass, about a second before the car arrives: leap (it then flies over the road just
+      // ahead of the car, which passes under it) or strike.
+      const lead = Math.max(24, speed * 0.72);
       if (sn.armed && ahead < lead && ahead > -2 && speed > 8) {
         sn.armed = false;
-        if (sn.pole.other && ahead > 30 && Math.random() < this.jumpChance) {
+        if (sn.pole.other && ahead > 16 && Math.random() < this.jumpChance) {
           sn.jumping = true;
           sn.t = 0;
           (sn.u.uDest.value as THREE.Vector3).set(sn.pole.other.x - sn.pole.x, sn.pole.other.y - sn.pole.y, sn.pole.other.z - sn.pole.z);
           this.onHiss?.();
           continue;
         }
-        sn.strikeAt = 34;
+        sn.strikeAt = 40;
       }
       if (sn.strikeAt && ahead < sn.strikeAt && ahead > -2) {
         sn.strikeAt = 0;
         sn.t = 0;
+        sn.bit = false;
         this.onHiss?.();
+      }
+      // A strike that reaches the car (it passes within reach while the snake is fully out) is a bite.
+      if (!sn.bit && sn.t > 0.1 && sn.t < 0.75 && inReach) {
+        sn.bit = true;
+        this.onBite?.();
       }
       if (!sn.armed && Math.abs(ahead) > 160) sn.armed = true;
       sn.t += dt;
@@ -446,58 +483,124 @@ function birdMesh(count: number, color: string, glide: number): { mesh: THREE.In
   return { mesh, uCenter, uHeading };
 }
 
-/** A flock of black birds that keeps wheeling around the player's part of the desert. */
+/**
+ * A flock of black birds that keeps wheeling around the player's part of the desert. Every 25-45 s it mobs the
+ * car: it drops into a tight swarm, swoops down and sweeps across the road just ahead of you, timed to meet the
+ * car, then climbs away. Driving into the swarm is a bird strike (`onHit`, once per pass).
+ */
 export class BirdFlock {
   readonly mesh: THREE.InstancedMesh;
   private readonly center: THREE.Vector3;
   private readonly heading: THREE.Vector2;
+  private readonly spread: THREE.Vector3;
   private readonly anchor = new THREE.Vector3();
   private started = false;
   private angle = Math.random() * 6.283;
+  private nextPass = 18 + Math.random() * 12;
+  private pass: { t: number; from: THREE.Vector3; a: THREE.Vector3; b: THREE.Vector3; hit: boolean } | null = null;
+  private readonly circle = new THREE.Vector3();
+  private readonly prev = new THREE.Vector3();
+  onHit?: () => void;
 
   constructor(count = 42, private readonly radius = 150, private readonly height = 42) {
     const b = birdMesh(count, '#0c0a0e', 0);
-    (b.mesh.material as THREE.ShaderMaterial).uniforms.uSize.value = 2.4;
+    const u = (b.mesh.material as THREE.ShaderMaterial).uniforms;
+    u.uSize.value = 2.4;
     this.mesh = b.mesh;
     this.mesh.name = 'bird-flock';
     this.center = b.uCenter;
     this.heading = b.uHeading;
+    this.spread = u.uSpread.value as THREE.Vector3;
   }
 
-  /** `around` = the player's position: the flock's circle drifts after it. */
-  update(time: number, dt: number, around: THREE.Vector3): void {
+  /**
+   * `around` = the player's position (its circle drifts after it); `fwd` / `right` = the road's directions there
+   * and `speed` the car's speed (for timing a swoop).
+   */
+  update(time: number, dt: number, around: THREE.Vector3, fwd?: THREE.Vector3, right?: THREE.Vector3, speed = 0): void {
     if (!this.started) { this.anchor.copy(around); this.started = true; }
     this.anchor.lerp(around, 1 - Math.exp(-dt * 0.5));
     this.angle += dt * 0.16;
     const r = this.radius * (0.75 + 0.25 * Math.sin(time * 0.13));
-    this.center.set(this.anchor.x + Math.cos(this.angle) * r, this.anchor.y + this.height + Math.sin(time * 0.21) * 12, this.anchor.z + Math.sin(this.angle) * r);
-    // Tangent of the circle (the way they fly).
-    this.heading.set(-Math.sin(this.angle), Math.cos(this.angle));
+    this.circle.set(this.anchor.x + Math.cos(this.angle) * r, this.anchor.y + this.height + Math.sin(time * 0.21) * 12, this.anchor.z + Math.sin(this.angle) * r);
+    this.prev.copy(this.center);
+    // Start a swoop: across the road where the car will be in ~2 s, from one side to the other, 2.5 m up.
+    this.nextPass -= dt;
+    if (!this.pass && this.nextPass <= 0 && fwd && right && speed > 20) {
+      const lead = speed * 2.0;
+      const p = around.clone().addScaledVector(fwd, lead);
+      const side = Math.random() < 0.5 ? -1 : 1;
+      this.pass = { t: 0, from: this.center.clone(), a: p.clone().addScaledVector(right, side * 26).setY(around.y + 2.6), b: p.clone().addScaledVector(right, -side * 26).setY(around.y + 2.4), hit: false };
+    }
+    const tight = new THREE.Vector3(7, 1.6, 5), loose = new THREE.Vector3(34, 9, 26);
+    if (this.pass) {
+      const ps = this.pass;
+      ps.t += dt;
+      const ease = (x: number) => x * x * (3 - 2 * x);
+      let k = 0;
+      if (ps.t < 1.2) { k = ease(ps.t / 1.2); this.center.copy(ps.from).lerp(ps.a, k); }        // dive in
+      else if (ps.t < 2.8) { this.center.copy(ps.a).lerp(ps.b, (ps.t - 1.2) / 1.6); k = 1; }    // sweep across the road
+      else if (ps.t < 5) { k = 1 - ease((ps.t - 2.8) / 2.2); this.center.copy(ps.b).lerp(this.circle, 1 - k); } // climb away
+      else { this.pass = null; this.nextPass = 25 + Math.random() * 20; }
+      this.spread.copy(loose).lerp(tight, Math.min(1, k * 1.4));
+      // Strike: the car drives into the swarm while it is low over the road.
+      if (this.pass && !ps.hit && ps.t > 1.0 && ps.t < 3.0) {
+        const dx = this.center.x - around.x, dz = this.center.z - around.z, dy = this.center.y - (around.y + 1);
+        if (dx * dx + dz * dz < 7 * 7 && Math.abs(dy) < 4) { ps.hit = true; this.onHit?.(); }
+      }
+    } else {
+      this.center.lerp(this.circle, 1 - Math.exp(-dt * 2));
+      this.spread.lerp(loose, 1 - Math.exp(-dt * 2));
+    }
+    // Head the way the flock is actually moving.
+    const mx = this.center.x - this.prev.x, mz = this.center.z - this.prev.z;
+    if (mx * mx + mz * mz > 1e-6) this.heading.set(mx, mz);
   }
 }
 
 /** Eagles gliding in slow circles high above given points (the mesas). */
+/**
+ * Eagles circling over the desert looking for prey: the same 3D bird as the diving one, gliding in wide
+ * banked circles 25-40 m up beside the road, now and then a few slow wing beats, and every so often a
+ * tightening spiral lower down as if it has spotted something.
+ */
 export class SoaringEagles {
   readonly group = new THREE.Group();
-  private readonly birds: { center: THREE.Vector3; heading: THREE.Vector2; at: THREE.Vector3; r: number; ph: number }[] = [];
+  private readonly birds: { e: FlyingEagle; at: THREE.Vector3; r: number; ph: number; dir: number; h: number }[] = [];
+  private readonly prev = new THREE.Vector3();
+  private readonly look = new THREE.Vector3();
 
-  constructor(points: { x: number; y: number; z: number }[]) {
+  /** `points`: centres of the circles (y = the ground there). */
+  constructor(points: { x: number; y: number; z: number }[], scale = 2.3) {
     this.group.name = 'soaring-eagles';
     points.forEach((p, i) => {
-      const b = birdMesh(1, '#3a2414', 1);
-      const u = (b.mesh.material as THREE.ShaderMaterial).uniforms;
-      u.uSize.value = 7;
-      u.uSpread.value.set(0, 0, 0);
-      this.group.add(b.mesh);
-      this.birds.push({ center: b.uCenter, heading: b.uHeading, at: new THREE.Vector3(p.x, p.y, p.z), r: 55 + i * 18, ph: i * 2.1 });
+      const e = flyingEagle();
+      e.group.scale.setScalar(scale);
+      e.legs.rotation.x = 0.9;
+      this.group.add(e.group);
+      this.birds.push({ e, at: new THREE.Vector3(p.x, p.y, p.z), r: 34 + (i % 3) * 9, ph: i * 2.3, dir: i % 2 ? 1 : -1, h: 26 + (i % 3) * 6 });
     });
   }
 
   update(time: number): void {
     for (const b of this.birds) {
-      const a = time * 0.11 + b.ph;
-      b.center.set(b.at.x + Math.cos(a) * b.r, b.at.y + Math.sin(time * 0.17 + b.ph) * 6, b.at.z + Math.sin(a) * b.r);
-      b.heading.set(-Math.sin(a), Math.cos(a));
+      // Hunting: every ~40 s the circle tightens and drops for a while, then widens and climbs again.
+      const hunt = Math.pow(Math.max(0, Math.sin(time * 0.16 + b.ph)), 6);
+      const r = b.r * (1 - 0.45 * hunt);
+      const w = (b.dir * 0.32 * 34) / r;                         // same air speed on a tighter circle = faster turn
+      const a = time * w + b.ph;
+      const g = b.e.group;
+      this.prev.copy(g.position);
+      g.position.set(b.at.x + Math.cos(a) * r, b.at.y + b.h * (1 - 0.5 * hunt) + Math.sin(time * 0.21 + b.ph) * 3, b.at.z + Math.sin(a) * r);
+      // Nose along the circle, banked into it.
+      this.look.set(-Math.sin(a) * b.dir, 0, Math.cos(a) * b.dir).add(g.position);
+      g.lookAt(this.look);
+      g.rotateZ(-b.dir * (0.35 + 0.25 * hunt));
+      // Mostly gliding with the wing tips up in a shallow V; a few slow beats now and then.
+      const beatOn = Math.max(0, Math.sin(time * 0.5 + b.ph * 1.7)) > 0.93 ? 1 : 0;
+      const beat = Math.sin(time * 6 + b.ph) * beatOn;
+      b.e.inner.forEach((wg, i) => { const sd = i === 0 ? 1 : -1; wg.rotation.z = sd * (0.14 + 0.6 * beat); wg.rotation.y = 0; });
+      b.e.outer.forEach((wg, i) => { const sd = i === 0 ? 1 : -1; wg.rotation.z = sd * (0.12 + 0.45 * Math.sin(time * 6 + b.ph - 0.9) * beatOn); wg.rotation.y = 0; });
     }
   }
 }
@@ -698,6 +801,7 @@ interface Perch {
   flyer: FlyingEagle;
   /** Smoothed wing pose: 0 = flapping, 1 = gliding; tuck 0..1 = wings half folded for the stoop. */
   glide: number; tuck: number;
+  hit: boolean;
   cross: THREE.Vector3; dir: THREE.Vector3; far: THREE.Vector3;
 }
 
@@ -743,11 +847,14 @@ export class PerchedEagles {
       this.group.add(f.group);
       this.birds.push({
         root: group, head, yaw: s.yaw, ph: i * 1.7, roadS: s.roadS, phase: 'perch', t: 0, armed: true,
-        flyer: f, glide: 1, tuck: 0,
+        flyer: f, glide: 1, tuck: 0, hit: false,
         cross: new THREE.Vector3(), dir: new THREE.Vector3(), far: new THREE.Vector3(),
       });
     });
   }
+
+  /** Called when the car hits a swooping eagle. */
+  onHit?: () => void;
 
   /** Is any eagle in the air right now? */
   get diving(): boolean {
@@ -782,6 +889,7 @@ export class PerchedEagles {
             b.far.copy(b.cross).addScaledVector(b.dir, 150).setY(b.cross.y + 55);
             b.phase = 'dive';
             b.t = 0;
+            b.hit = false;
             b.root.visible = false;
             b.flyer.group.visible = true;
             b.flyer.group.position.copy(b.root.position);
@@ -830,6 +938,8 @@ export class PerchedEagles {
           continue;
         }
       }
+      // The car drives into the eagle while it swoops low over the road: a strike (once per dive).
+      if (!b.hit && (b.phase === 'dive' || b.phase === 'away') && pos.distanceTo(target) < 4) { b.hit = true; this.onHit?.(); }
       // Nose along the flight path (it pitches down in the stoop and up in the climb).
       this.v.copy(pos).sub(this.prev);
       if (this.v.lengthSq() > 1e-6) b.flyer.group.lookAt(this.v.add(pos));

@@ -9,6 +9,8 @@ export const BOOST = {
   kickCost: 0.05, // meter spent by each shove
   burn: 0.25, // meter per second while boosting
   driftGain: 0.12, // meter per second of a full drift (× up to 1.2 for a deep angle)
+  cruiseGain: 0.03, // meter per second just driving on the throttle above cruiseSpeed (a full bar in ~33 s), not while boosting
+  cruiseSpeed: 20, // m/s
   hitGain: 0.08, // per car-to-car hit
   hitCooldown: 0.6,
   scrapeDrain: 0.25, // per second against a wall

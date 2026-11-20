@@ -499,7 +499,7 @@ class Car3(Car2):
         target = Vector((0, 0, 0.5 * k))
         sc.render.engine = 'BLENDER_EEVEE'
         sc.render.resolution_x, sc.render.resolution_y = 1280, 720
-        for suffix, loc in (('', (5.2, 6.4, 2.0)), ('_rear', (-5.4, -6.4, 2.3)), ('_side', (8.6, 0.0, 1.0)), ('_top', (3.0, 3.5, 7.5))):
+        for suffix, loc in (('', (5.2, 6.4, 2.0)), ('_rear', (-5.4, -6.4, 2.3)), ('_side', (8.6, 0.0, 1.0)), ('_top', (3.0, 3.5, 7.5)), ('_front', (0.0, 7.2, 1.3)), ('_close', (2.0, 3.4, 1.0))):
             cam.location = Vector(loc) * k
             cam.rotation_euler = (target - cam.location).to_track_quat('-Z', 'Y').to_euler()
             sc.render.filepath = self.preview.replace('.png', f'{suffix}.png')

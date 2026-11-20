@@ -47,6 +47,45 @@ export type HillWave = [cycles: number, amplitude: number, phase: number];
  * along the track). Control points are rescaled so the lap has exactly `targetLength` metres.
  * Frames keep a horizontal forward/right; `slopeAt` gives the climb (dh/ds) for physics and visuals.
  */
+/**
+ * Smooths a closed centre line so no stretch of it turns tighter than `minR`: the line is resampled every 3 m
+ * and the points in (and around) a too-tight stretch are relaxed towards their neighbours until the radius over
+ * ~24 m is at least `minR`. Gentle bends are untouched; tight ones move a few metres to the inside.
+ */
+function relaxCorners(curve: THREE.CatmullRomCurve3, minR: number): THREE.Vector3[] {
+  const step = 3;
+  let pts = curve.getSpacedPoints(Math.round(curve.getLength() / step)).slice(0, -1);
+  const n = pts.length;
+  const K = 4; // stencil half-width in points (radius measured over 2·K·step = 24 m)
+  const radius = (i: number) => {
+    const a = pts[(i - K + n) % n], b = pts[i], c = pts[(i + K) % n];
+    const ab = Math.hypot(b.x - a.x, b.z - a.z), bc = Math.hypot(c.x - b.x, c.z - b.z), ca = Math.hypot(a.x - c.x, a.z - c.z);
+    const cross = Math.abs((b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x));
+    return cross < 1e-6 ? Infinity : (ab * bc * ca) / (2 * cross);
+  };
+  const w = new Float32Array(n), ww = new Float32Array(n);
+  for (let iter = 0; iter < 1500; iter++) {
+    let worst = Infinity;
+    for (let i = 0; i < n; i++) {
+      const r = radius(i);
+      worst = Math.min(worst, r);
+      w[i] = r < minR ? Math.min(1, (minR / r - 1) * 2 + 0.2) : 0;
+    }
+    if (worst >= minR * 0.97) break;
+    // Spread the weights so the whole bend eases (no new kinks at its ends).
+    const S = 8;
+    for (let i = 0; i < n; i++) { let m = 0; for (let j = -S; j <= S; j++) m = Math.max(m, w[(i + j + n) % n] * (1 - Math.abs(j) / (S + 1))); ww[i] = m; }
+    pts = pts.map((p, i) => {
+      if (!ww[i]) return p;
+      const a = pts[(i - 1 + n) % n], c = pts[(i + 1) % n];
+      const k = 0.5 * ww[i];
+      return new THREE.Vector3(p.x + ((a.x + c.x) / 2 - p.x) * k, p.y, p.z + ((a.z + c.z) / 2 - p.z) * k);
+    });
+  }
+  // Keep every 4th point (12 m) as spline control points: smooth, and light to evaluate.
+  return pts.filter((_, i) => i % 4 === 0);
+}
+
 export class LoopTrack implements Track {
   readonly closed = true;
   readonly length: number;
@@ -69,6 +108,8 @@ export class LoopTrack implements Track {
     lanes: number;
     sections?: TrackSection[];
     hills?: HillWave[];
+    /** Corners are opened up to at least this radius (m); 0 = keep the drawn line exactly. Default 50. */
+    minRadius?: number;
   }) {
     this.height = opts.height;
     this.hills = opts.hills ?? [];
@@ -82,6 +123,12 @@ export class LoopTrack implements Track {
     const scaled = opts.points.map(([x, z]) => new THREE.Vector3(x * scale, opts.height, z * scale));
     curve = new THREE.CatmullRomCurve3(scaled, true, 'centripetal');
     curve.arcLengthDivisions = 4000;
+    // Open up corners tighter than the minimum radius (and kinks where a bend suddenly tightens).
+    const minR = opts.minRadius ?? 50;
+    if (minR > 0) {
+      curve = new THREE.CatmullRomCurve3(relaxCorners(curve, minR), true, 'catmullrom', 0.5);
+      curve.arcLengthDivisions = 4000;
+    }
     this.curve = curve;
     this.length = curve.getLength();
 

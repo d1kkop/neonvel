@@ -5,3 +5,11 @@ server/*.db-*
 .tmp
 renders
 __pycache__
+
+# Local secrets for the game server (Stripe keys etc.) - never commit
+server/.env
+.env
+
+# Cloudflare local secrets + local state
+cloud/.dev.vars
+cloud/.wrangler
