@@ -366,15 +366,19 @@ export class EngineSound {
       frac = (s.rpm - 900) / (7600 - 900);
       this.aGear = 0;
     } else {
-      const G = P.gears, last = G.length - 1;
-      if (this.aGear < last && s.speed01 > G[this.aGear] * 0.985) { this.aGear++; shifted = 1; }
-      else if (this.aGear > 0 && s.speed01 < G[this.aGear - 1] * 0.8) { this.aGear--; shifted = -1; }
-      const lo = this.aGear === 0 ? 0 : G[this.aGear - 1] * 0.6;
-      const k = Math.max(0, Math.min(1.06, (s.speed01 - lo) / (G[this.aGear] - lo)));
-      // In gear the engine works between about a quarter and nine tenths of its range (not pinned at the top).
-      frac = this.aGear === 0 ? 0.06 + 0.84 * k : 0.22 + 0.68 * k;
-      // Garage demo: show the engine off — each gear revs out to just under the redline before the shift.
-      if (this.previewing && thr > 0.5) frac = this.aGear === 0 ? 0.08 + 0.9 * k : 0.34 + 0.64 * Math.pow(Math.min(1, k), 1.15);
+      // Like a real gearbox: in a gear the revs are proportional to road speed (G[g] = the speed at which this gear
+      // reaches the redline). Under power it shifts up just below the redline, and the revs then drop to what the
+      // next gear gives at that speed (a big drop in the low gears, a small one in the high gears) and climb again.
+      // Low gears stretched a little (pow 0.8): the car pulls hardest there, so unstretched they flashed by.
+      const G = P.gears.map((g) => Math.pow(g, 0.8)), last = G.length - 1;
+      const upAt = thr > 0.5 ? 0.97 : 0.8; // cruising / lifting: shifts up earlier, like an automatic would
+      if (this.aGear < last && s.speed01 > G[this.aGear] * upAt) { this.aGear++; shifted = 1; }
+      else if (this.aGear > 0 && s.speed01 < G[this.aGear - 1] * 0.55) { this.aGear--; shifted = -1; }
+      const r = s.speed01 / G[this.aGear]; // revs as a fraction of the redline
+      // Pulling away in first, the clutch slips: the revs can't fall below about a third (more on the throttle).
+      const floor = this.aGear === 0 ? 0.28 + 0.3 * thr : 0.3;
+      const rpmK = Math.max(floor, Math.min(1.02, r));
+      frac = Math.max(0, (rpmK * P.redline - P.idle) / (P.redline - P.idle));
     }
     if (shifted) this.shiftLeft = P.shiftTime;
     this.shiftLeft = Math.max(0, this.shiftLeft - dt);

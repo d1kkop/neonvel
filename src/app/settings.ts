@@ -83,7 +83,7 @@ const DEFAULTS: Settings = {
   authToken: '',
   rating: START_RATING,
   games: 0,
-  version: 6,
+  version: 7,
 };
 
 export function loadSettings(): Settings {
@@ -124,6 +124,11 @@ export function loadSettings(): Settings {
       if (s.version < 6) {
         s.bestLaps = {};
         s.version = 6;
+      }
+      // v7: new acceleration curve: personal lap bests reset once more.
+      if (s.version < 7) {
+        s.bestLaps = {};
+        s.version = 7;
       }
       return s;
     }

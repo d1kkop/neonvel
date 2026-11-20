@@ -40,8 +40,8 @@ const wavB64 = await page.evaluate(async (shots, total, FPS) => {
     const s = shotAt(fr);
     if (s) {
       const t = fr * step;
-      const levelCut = s !== prevShot && prevShot && prevShot.level !== s.level;
-      if (levelCut) sfx.whoosh(Math.floor(t / 2) % 2 ? -0.6 : 0.6, s.scene === 'glimpse' ? 0.8 : 0.55, s.scene === 'glimpse' ? 0.45 : 0.7);
+      // Whoosh on the big moments only (title, feature cards, end), not on every cut.
+      if (s !== prevShot && prevShot && (s.flash ?? 0) > 0) sfx.whoosh(Math.floor(t / 2) % 2 ? -0.6 : 0.6, 0.6, 0.7);
       // A different car: only the engine's voice changes, the revs carry on (it is already at speed).
       if (s.car !== profileCar && !s.logo) { engine.setProfile(engineOf(s.car)); profileCar = s.car; }
       prevShot = s;

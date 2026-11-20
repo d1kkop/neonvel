@@ -12,7 +12,10 @@ import { TIMELINE, FPS, W, H } from './timeline.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(path.join(root, '.tmp/node_modules/'));
 const puppeteer = require('puppeteer-core');
-const OUT = path.join(root, 'renders/promo/frames');
+// CLIPS=1: clean clips for editing (tools/promo/clips-list.mjs), one folder of frames per clip, no captions.
+const CLIP_MODE = process.env.CLIPS === '1';
+const LIST = CLIP_MODE ? (await import('./clips-list.mjs')).CLIPS : TIMELINE;
+const OUT = path.join(root, CLIP_MODE ? 'renders/promo/clipframes' : 'renders/promo/frames');
 fs.mkdirSync(OUT, { recursive: true });
 // Old frames go, unless KEEP=1 (re-render only the ONLY= shots in place, at their own frame numbers).
 const KEEP = process.env.KEEP === '1';
@@ -22,7 +25,7 @@ const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null; // test sing
 const browser = await puppeteer.launch({
   executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe',
   headless: 'new',
-  userDataDir: path.join(root, '.tmp/profiles/promo'),
+  userDataDir: path.join(root, CLIP_MODE ? '.tmp/profiles/promo-clips' : '.tmp/profiles/promo'),
   args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--mute-audio', `--window-size=${W},${H}`],
   env: { ...process.env, TEMP: path.join(root, '.tmp/tmp'), TMP: path.join(root, '.tmp/tmp') },
 });
@@ -86,13 +89,13 @@ await page.evaluate(async () => {
     <div class="flash"></div>`;
   document.body.appendChild(ov);
   // Keep a scripted camera inside the road corridor: between the rails, above the road, low under roofs/tunnels.
-  window.__clampCam = (cam, w) => {
+  window.__clampCam = (cam, w, wide = 0) => {
     const t = w.track, V = cam.position.constructor;
     const d = t.nearestSample(cam.position.x, cam.position.z) * t.sampleStep;
     const fr = { position: new V(), forward: new V(), right: new V(), up: new V() };
     t.frameAt(d, fr);
     const lat = cam.position.clone().sub(fr.position).dot(fr.right);
-    const hw = t.width / 2 - 1.3;
+    const hw = t.width / 2 - 1.3 + wide; // wide: high shots may hang out over the scenery
     if (Math.abs(lat) > hw) cam.position.addScaledVector(fr.right, Math.sign(lat) * hw - lat);
     cam.position.y = Math.max(cam.position.y, fr.position.y + 0.45);
     if (t.sectionAt(d, 8)) cam.position.y = Math.min(cam.position.y, fr.position.y + 3.6);
@@ -113,6 +116,55 @@ const CAMS = {
     if (cam.fov !== (o.fov ?? 40)) { cam.fov = o.fov ?? 40; cam.updateProjectionMatrix(); }
     return true;
   }`,
+  // Crane: starts high and far behind, comes down to a low chase position over the shot (eased).
+  crane: `(cam, w, dt, alpha, t, o) => {
+    const ph = w.player.phys, a = window.__app;
+    const s = ph.ps + (ph.s - ph.ps) * alpha, x = ph.px + (ph.x - ph.px) * alpha;
+    const u = Math.min(1, t / o.dur), e = u * u * (3 - 2 * u);
+    const back = (o.back0 ?? 42) + ((o.back1 ?? 8) - (o.back0 ?? 42)) * e, h = (o.h0 ?? 30) + ((o.h1 ?? 1.6) - (o.h0 ?? 30)) * e;
+    const fr = a.frame; w.track.frameAt(s - back, fr);
+    cam.position.copy(fr.position).addScaledVector(fr.right, x + (o.lat ?? 0) * (1 - e)); cam.position.y += h;
+    window.__clampCam(cam, w, h > 12 ? 18 : 0);
+    const p = w.player.car.group.position; w.track.frameAt(s + 6, fr);
+    cam.lookAt(p.x * 0.7 + fr.position.x * 0.3, p.y + 0.8, p.z * 0.7 + fr.position.z * 0.3);
+    if (cam.fov !== (o.fov ?? 55)) { cam.fov = o.fov ?? 55; cam.updateProjectionMatrix(); }
+    return true;
+  }`,
+  // Drone: high above, slightly behind and to the side, gliding along with the pack and looking down.
+  drone: `(cam, w, dt, alpha, t, o) => {
+    const ph = w.player.phys, a = window.__app;
+    const s = ph.ps + (ph.s - ph.ps) * alpha;
+    const fr = a.frame; w.track.frameAt(s + (o.ahead ?? -10) + t * (o.drift ?? 3), fr);
+    cam.position.copy(fr.position).addScaledVector(fr.right, o.lat ?? 9); cam.position.y += o.h ?? 26;
+    window.__clampCam(cam, w, 18);
+    const p = w.player.car.group.position; w.track.frameAt(s + 14, fr);
+    cam.lookAt(p.x * 0.6 + fr.position.x * 0.4, p.y, p.z * 0.6 + fr.position.z * 0.4);
+    if (cam.fov !== (o.fov ?? 50)) { cam.fov = o.fov ?? 50; cam.updateProjectionMatrix(); }
+    return true;
+  }`,
+  // Fly-by: the camera stands still at the roadside, low; the car races past it.
+  flyby: `(cam, w, dt, alpha, t, o) => {
+    const ph = w.player.phys, a = window.__app;
+    if (!o._pt) {
+      const fr = a.frame; w.track.frameAt(ph.s + (o.lead ?? Math.max(35, ph.v * 1.3)), fr);
+      const side = o.side ?? 1, hw = w.track.width / 2 - 1.6;
+      o._pt = fr.position.clone().addScaledVector(fr.right, side * hw); o._pt.y += o.h ?? 0.8;
+    }
+    cam.position.copy(o._pt);
+    const p = w.player.car.group.position; cam.lookAt(p.x, p.y + 0.6, p.z);
+    if (cam.fov !== (o.fov ?? 42)) { cam.fov = o.fov ?? 42; cam.updateProjectionMatrix(); }
+    return true;
+  }`,
+  // Detail: very close and low around the car (wheel, lamps), slow turn, long lens.
+  detail: `(cam, w, dt, alpha, t, o) => {
+    const p = w.player.car.group.position, yaw = w.player.car.group.rotation.y;
+    const ang = (o.a0 ?? 1.2) + t * (o.speed ?? 0.3), r = o.r ?? 2.6;
+    cam.position.set(p.x + Math.sin(yaw + ang) * r, p.y + (o.h ?? 0.4), p.z + Math.cos(yaw + ang) * r);
+    const fx = Math.sin(yaw) * (o.focus ?? 0), fz = Math.cos(yaw) * (o.focus ?? 0);
+    cam.lookAt(p.x + fx, p.y + (o.lookH ?? 0.45), p.z + fz);
+    if (cam.fov !== (o.fov ?? 34)) { cam.fov = o.fov ?? 34; cam.updateProjectionMatrix(); }
+    return true;
+  }`,
   // Low, fast tracking shot ahead of the car looking back at it.
   lowfront: `(cam, w, dt, alpha, t, o) => {
     const ph = w.player.phys, a = window.__app;
@@ -128,12 +180,14 @@ const CAMS = {
 
 let frame = 0;
 let prev = null;
-for (const shot0 of TIMELINE) {
+if (CLIP_MODE) await page.evaluate(() => { document.getElementById('promo').style.display = 'none'; });
+for (const shot0 of LIST) {
   if (ONLY && !ONLY.includes(shot0.id) && !ONLY.includes(shot0.scene)) { if (KEEP) frame += Math.round(shot0.dur * FPS); prev = shot0; continue; }
   // Flash / fade only when the level changes; within a level the shot just cuts and the captions stay up.
   const sameLevel = !!prev && prev.level === shot0.level;
-  const shot = { ...shot0, flash: sameLevel ? 0 : (shot0.flash ?? (prev ? 0.35 : 0)), keepName: sameLevel && prev.name === shot0.name, keepCap: sameLevel && prev.caption === shot0.caption };
-  const next = TIMELINE[TIMELINE.indexOf(shot0) + 1];
+  const shot = { ...shot0, flash: sameLevel ? 0 : (shot0.flash ?? 0), keepName: sameLevel && prev.name === shot0.name, keepCap: sameLevel && prev.caption === shot0.caption };
+  const next = LIST[LIST.indexOf(shot0) + 1];
+  if (CLIP_MODE) { frame = 0; shot.flash = 0; fs.mkdirSync(path.join(OUT, shot0.id), { recursive: true }); }
   shot.nextSameName = !!next && next.level === shot0.level && next.name === shot0.name && !!shot0.name;
   shot.nextSameCap = !!next && next.level === shot0.level && next.caption === shot0.caption && !!shot0.caption;
   prev = shot0;
@@ -157,18 +211,22 @@ for (const shot0 of TIMELINE) {
   await page.evaluate((shot, cams) => {
     const a = window.__app;
     a.loop.manual = true;
-    const preroll = window.__promoFresh ? (shot.preroll ?? 3) : 0;
+    const preroll = window.__promoFresh ? (shot.preroll ?? 6) : 0; // the pack is at cruising speed when filming starts
     a.captureCam = undefined;
     for (let i = 0; i < preroll * 30; i++) a.loop.advance(1 / 30);
-    if (shot.skipTo !== undefined && window.__promoFresh) {
-      // Jump the cars to a nicer part of the track (sky / scenery).
-      for (const c of a.world.cars) { const d = shot.skipTo - a.world.player.phys.s; c.phys.s += d; c.phys.ps = c.phys.s; }
+    if (shot.skipTo !== undefined) {
+      // Move the whole pack to an open stretch of the track (no roofs over the high shots), keeping their gaps.
+      const L = a.world.track.length, s0 = a.world.player.phys.s;
+      const d = shot.skipTo - (((s0 % L) + L) % L);
+      for (const c of a.world.cars) { c.phys.s += d; c.phys.ps += d; }
+      for (let i = 0; i < 2; i++) a.loop.advance(1 / 30);
     }
     // Camera for this shot: a scripted one, or one of the game's own attract shots.
     const t0 = { t: 0 };
     if (shot.cam && cams[shot.cam]) {
       const fn = eval(cams[shot.cam]);
-      a.captureCam = (cam, w, dt, alpha) => { t0.t += dt; return fn(cam, w, dt, alpha, t0.t, shot.camOpts ?? {}); };
+      const opts = { ...(shot.camOpts ?? {}), dur: shot.dur };
+      a.captureCam = (cam, w, dt, alpha) => { t0.t += dt; return fn(cam, w, dt, alpha, t0.t, opts); };
     } else {
       a.shot = shot.attract ?? 0;
       a.shotTimer = shot.shotStart ?? 0;
@@ -181,7 +239,7 @@ for (const shot0 of TIMELINE) {
     const u = i / n, ts = i / FPS;
     await page.evaluate((shot, u, ts, n, i) => {
       const a = window.__app, q = (s) => document.querySelector(`#promo ${s}`);
-      if (window.__promoBoost) { const ph = a.world.player.phys; ph.boost = 1; if (i % 2 === 0) ph.v = Math.min(ph.v + 1.2, a.world.player.spec.topSpeed * 1.25); }
+      if (window.__promoBoost) a.world.player.phys.boost = 1; // a full bar: the AI driver fires it itself (real physics)
       // Captions: fade in over 0.25 s, out over the last 0.2 s.
       const inK = Math.min(1, ts / 0.25), outK = Math.min(1, (n - i) / 6);
       const k = Math.min(inK, outK);
@@ -199,6 +257,7 @@ for (const shot0 of TIMELINE) {
       q('.feat .f1').textContent = shot.feature ?? '';
       q('.feat .f1').style.fontSize = `${Math.min(118, Math.floor(1640 / (Math.max(1, (shot.feature ?? '').length) * 0.86)))}px`; // always fits
       q('.feat .f2').textContent = shot.featureSub ?? '';
+      q('.feat .f2').style.fontSize = `${Math.min(40, Math.floor(1700 / (Math.max(1, (shot.featureSub ?? '').length) * 0.78)))}px`; // fits
       q('.feat').style.opacity = shot.feature ? String(k) : '0';
       q('.feat').style.transform = `scale(${0.92 + 0.08 * inK + u * 0.04})`;
       q('.name').style.opacity = shot.name ? String(nk) : '0';
@@ -213,7 +272,7 @@ for (const shot0 of TIMELINE) {
     }, shot, u, ts, n, i);
     const { data } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 93, optimizeForSpeed: true });
     frame++;
-    fs.writeFileSync(path.join(OUT, `${String(frame).padStart(5, '0')}.jpg`), Buffer.from(data, 'base64'));
+    fs.writeFileSync(path.join(OUT, CLIP_MODE ? shot0.id : '', `${String(frame).padStart(5, '0')}.jpg`), Buffer.from(data, 'base64'));
     if (frame % 150 === 0) console.log(`  ${frame} frames`);
   }
 }

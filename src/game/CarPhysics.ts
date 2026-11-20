@@ -117,7 +117,11 @@ export function stepPhys(c: CarPhys, inp: InputState & { handbrake?: number; boo
   const speed01 = Math.max(0, c.v) / top;
   // Engine pull fades late (cubic) and drag is moderate, so cars really reach ~90% of their top speed.
   const throttle = c.boosting ? 1 : inp.throttle;
-  const engine = throttle * spec.accel * (c.boosting ? BOOST.power : 1) * Math.max(0.15, 1 - speed01 * speed01 * speed01);
+  // Like a real car: full pull (what the tyres allow) up to about 110 km/h, above that the engine's power is
+  // spread over more speed (force ~ power / speed), so the acceleration tapers off instead of staying constant.
+  const POWER_V = 30; // m/s where traction-limited turns into power-limited
+  const powerK = Math.min(1, POWER_V / Math.max(1, Math.abs(c.v)));
+  const engine = throttle * spec.accel * (c.boosting ? BOOST.power : 1) * Math.max(0.12, powerK * (1.25 - 0.25 * powerK)) * Math.max(0.15, 1 - speed01 * speed01 * speed01);
   // Drift mode: the brake also holds a drift, so while sliding it only bites lightly.
   // While drifting the brakes bite less (the slide keeps its speed), but enough to scrub speed off when you need to.
   const braking = inp.brake * spec.brake * (c.v > 0.5 ? 1 : 0) * (1 - (spec.driftMode ? 0.6 : 0.3) * c.drift);
