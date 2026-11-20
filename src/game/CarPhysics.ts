@@ -119,7 +119,8 @@ export function stepPhys(c: CarPhys, inp: InputState & { handbrake?: number; boo
   const throttle = c.boosting ? 1 : inp.throttle;
   const engine = throttle * spec.accel * (c.boosting ? BOOST.power : 1) * Math.max(0.15, 1 - speed01 * speed01 * speed01);
   // Drift mode: the brake also holds a drift, so while sliding it only bites lightly.
-  const braking = inp.brake * spec.brake * (c.v > 0.5 ? 1 : 0) * (1 - (spec.driftMode ? 0.8 : 0.6) * c.drift);
+  // While drifting the brakes bite less (the slide keeps its speed), but enough to scrub speed off when you need to.
+  const braking = inp.brake * spec.brake * (c.v > 0.5 ? 1 : 0) * (1 - (spec.driftMode ? 0.6 : 0.3) * c.drift);
   const drag = 0.0006 * c.v * c.v + 0.15;
   c.v += (engine - braking - drag) * dt;
   // Reverse-ish: brake at standstill backs up slowly.

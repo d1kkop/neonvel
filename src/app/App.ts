@@ -52,6 +52,10 @@ export class App {
   private readonly input = new Input();
   private readonly menu: Menu;
   private readonly hud: Hud;
+  /** The frame loop (video capture drives it by hand, see tools/promo). */
+  private loop!: GameLoop;
+  /** Video capture: a scripted camera for menu / attract scenes (returns false to fall back to the normal shots). */
+  captureCam?: (cam: THREE.PerspectiveCamera, w: World, dt: number, alpha: number) => boolean;
   private readonly chase: ChaseCamera;
   private readonly orbit: OrbitControls;
   private readonly net: NetClient;
@@ -198,7 +202,8 @@ export class App {
         this.menu.toast(`${r.item.startsWith('level:') ? LEVEL_NAMES[r.item.slice(6)] : carById(r.item).name} unlocked — thank you!`);
       }
     });
-    new GameLoop((dt) => this.update(dt), (a, dt) => this.render(a, dt)).start();
+    this.loop = new GameLoop((dt) => this.update(dt), (a, dt) => this.render(a, dt));
+    this.loop.start();
     (window as unknown as { __app: App }).__app = this;
   }
 
@@ -686,7 +691,7 @@ export class App {
     const p = w.player;
 
     if (this.state === 'menu' || this.state === 'loading') {
-      this.attractCamera(w, dt, this.paused ? 1 : alpha);
+      if (!this.captureCam?.(this.camera, w, dt, this.paused ? 1 : alpha)) this.attractCamera(w, dt, this.paused ? 1 : alpha);
     } else if (this.freeCam) {
       if (!this.orbit.enabled) {
         this.orbit.enabled = true;

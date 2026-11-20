@@ -13,3 +13,4 @@ server/.env
 # Cloudflare local secrets + local state
 cloud/.dev.vars
 cloud/.wrangler
+cloud/.cf-token

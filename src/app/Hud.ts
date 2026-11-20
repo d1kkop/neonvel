@@ -33,7 +33,7 @@ export class Hud {
   /** Touch scheme: on-screen ◀ ▶ buttons, a steering stick, or tilting the phone; autoGas = throttle unless braking. */
   private touchMode: 'buttons' | 'stick' | 'tilt' = 'buttons';
   private autoGas = true;
-  private readonly held = new Map<number, string>(); // pointer id -> button key
+  private readonly held = new Map<number, Set<string>>(); // pointer id -> the buttons under that finger
   private stickX = 0;
   private tiltX = 0;
   private readonly isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 1;
@@ -80,9 +80,14 @@ export class Hud {
     this.posBox = q('[data-posbox]');
     this.beatPopEl = q('[data-beatpop]');
     const bb = q('[data-boostbtn]');
-    const hold = (on: boolean) => (e: Event) => { e.preventDefault(); this.boostHeld = on; bb.classList.toggle('held', on); };
-    bb.addEventListener('pointerdown', hold(true));
-    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) bb.addEventListener(ev, hold(false));
+    // Touch boost is a tap switch: it burns until the bar is empty (or a second tap), so the thumb is free for DRIFT.
+    bb.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.boostHeld = !this.boostHeld;
+      bb.classList.toggle('held', this.boostHeld);
+      navigator.vibrate?.(this.boostHeld ? 15 : 8);
+    });
+    this.boostBtn = bb;
     const bar = q('[data-bar]');
     for (let i = 0; i < 16; i++) {
       const b = document.createElement('i');
@@ -106,28 +111,56 @@ export class Hud {
     this.recompute();
   }
 
-  /** Multi-touch buttons: every finger is tracked on its own, so steering + brake + boost work together. */
+  private boostBtn: HTMLElement | null = null;
+
+  /**
+   * Thumb-friendly touch zones. Every finger is tracked on its own (steer + pedals at once), a finger may slide
+   * from button to button, and on the right a thumb presses every button within a thumb's reach — rest it on
+   * the edge between DRIFT and BRAKE and both work. The steering zone picks the nearest arrow (never both).
+   */
   private setupButtons(): void {
-    this.el.querySelectorAll<HTMLElement>('.tc-btn').forEach((b) => {
-      const k = b.dataset.k!;
-      b.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        b.setPointerCapture(e.pointerId);
-        this.held.set(e.pointerId, k);
-        b.classList.add('held');
-        navigator.vibrate?.(8);
-        this.recompute();
-      });
-      const up = (e: PointerEvent) => {
-        if (this.held.get(e.pointerId) !== k) return;
-        this.held.delete(e.pointerId);
-        if (![...this.held.values()].includes(k)) b.classList.remove('held');
+    for (const zone of this.el.querySelectorAll<HTMLElement>('.tc-steer, .tc-pedals')) {
+      const btns = [...zone.querySelectorAll<HTMLElement>('.tc-btn')];
+      const pedals = zone.classList.contains('tc-pedals');
+      const REACH = 28; // px around a pedal that still counts (a thumb is wider than its touch point)
+      const hit = (x: number, y: number): Set<string> => {
+        const out = new Set<string>();
+        let best = '', bd = Infinity;
+        for (const b of btns) {
+          if (b.offsetParent === null) continue; // hidden (GAS with auto gas)
+          const r = b.getBoundingClientRect();
+          const d = Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom));
+          if (pedals) { if (d <= REACH) out.add(b.dataset.k!); } else if (d < bd) { bd = d; best = b.dataset.k!; }
+        }
+        if (!pedals && best && bd < 80) out.add(best);
+        return out;
+      };
+      const set = (e: PointerEvent) => {
+        const prev = this.held.get(e.pointerId);
+        const now = hit(e.clientX, e.clientY);
+        if ([...now].some((k) => !prev?.has(k))) navigator.vibrate?.(8);
+        this.held.set(e.pointerId, now);
+        this.paintButtons();
         this.recompute();
       };
-      b.addEventListener('pointerup', up);
-      b.addEventListener('pointercancel', up);
-      b.addEventListener('contextmenu', (e) => e.preventDefault());
-    });
+      zone.addEventListener('pointerdown', (e) => { e.preventDefault(); zone.setPointerCapture(e.pointerId); set(e); });
+      zone.addEventListener('pointermove', (e) => { if (this.held.has(e.pointerId)) set(e); });
+      const up = (e: PointerEvent) => { if (this.held.delete(e.pointerId)) { this.paintButtons(); this.recompute(); } };
+      zone.addEventListener('pointerup', up);
+      zone.addEventListener('pointercancel', up);
+      zone.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+  }
+
+  private heldKeys(): Set<string> {
+    const keys = new Set<string>();
+    for (const s of this.held.values()) for (const k of s) keys.add(k);
+    return keys;
+  }
+
+  private paintButtons(): void {
+    const keys = this.heldKeys();
+    this.el.querySelectorAll<HTMLElement>('.tc-btn').forEach((b) => b.classList.toggle('held', keys.has(b.dataset.k!)));
   }
 
   /** Tilt steering: the phone held in landscape like a wheel (about 25 degrees = full lock). */
@@ -143,7 +176,7 @@ export class Hud {
 
   private recompute(): void {
     if (!this.isTouch) { this.touch = null; return; }
-    const keys = new Set(this.held.values());
+    const keys = this.heldKeys();
     let steer = 0;
     if (this.touchMode === 'buttons') steer = (keys.has('right') ? 1 : 0) - (keys.has('left') ? 1 : 0);
     else if (this.touchMode === 'stick') steer = this.stickX;
@@ -161,6 +194,8 @@ export class Hud {
     if (d.lapTime !== undefined) this.lapTime.textContent = formatTime(Math.max(0, d.lapTime));
     this.best.textContent = d.best !== undefined && Number.isFinite(d.best) ? formatTime(d.best) : '—';
     const b = d.boost ?? 0;
+    // Touch boost switch: off again once the bar is empty.
+    if (this.boostHeld && b < 0.01 && !d.boosting) { this.boostHeld = false; this.boostBtn?.classList.remove('held'); }
     this.boostFill.style.width = `${(b * 100).toFixed(1)}%`;
     this.boostBox.classList.toggle('full', b > 0.98);
     this.boostBox.classList.toggle('low', !!d.boosting && b < 0.2);

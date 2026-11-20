@@ -249,18 +249,20 @@ table.lb tr.gap td { text-align: center; opacity: .5; padding: 2px; border-botto
   .tc-left, .tc-right { width: min(17vw, 110px); height: min(30vh, 120px); font-size: 34px; }
   #hud .stick { display: none; }
   #hud.tc-stick .stick { display: block; left: max(18px, env(safe-area-inset-left)); bottom: 14px; width: min(36vh, 150px); height: min(36vh, 150px); }
-  .tc-pedals { display: grid; position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: 14px;
-    grid-template-columns: auto auto; grid-template-rows: auto auto; gap: 10px; align-items: end; }
-  .tc-gas { grid-column: 2; grid-row: 1 / 3; width: min(15vw, 96px); height: min(44vh, 170px); font-size: 15px; border-color: rgba(120, 255, 160, .8); }
-  .tc-brake { grid-column: 1; grid-row: 2; width: min(15vw, 96px); height: min(22vh, 84px); font-size: 14px; border-color: rgba(255, 70, 110, .85); }
-  .tc-drift { grid-column: 1; grid-row: 1; width: min(15vw, 96px); height: min(18vh, 68px); font-size: 13px; border-color: rgba(255, 43, 214, .85); }
+  /* Right thumb: DRIFT and BRAKE side by side (one thumb can rest on both), GAS beside them (manual gas only),
+     BOOST (tap switch) above. The zones are padded so a near-miss still counts. */
+  #hud .tc-steer, #hud .tc-pedals { pointer-events: auto; touch-action: none; }
+  #hud.tc-buttons .tc-steer { padding: 12px; margin: -12px; }
+  .tc-pedals { display: flex; position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: 14px; gap: 8px;
+    align-items: flex-end; padding: 12px; margin: -12px; }
+  .tc-drift, .tc-brake { width: min(15vw, 100px); height: min(30vh, 118px); font-size: 14px; }
+  .tc-drift { border-color: rgba(255, 43, 214, .85); order: 1; }
+  .tc-brake { border-color: rgba(255, 70, 110, .85); order: 2; }
+  .tc-gas { order: 3; width: min(14vw, 92px); height: min(38vh, 150px); font-size: 15px; border-color: rgba(120, 255, 160, .8); }
   #hud.autogas .tc-gas { display: none; }
-  #hud.autogas .tc-pedals { grid-template-columns: auto; }
-  #hud.autogas .tc-brake { grid-column: 1; height: min(30vh, 120px); }
-  #hud.autogas .tc-drift { grid-column: 1; }
-  .boost-btn { right: auto; left: auto; bottom: auto; position: absolute; width: min(14vw, 84px); height: min(14vw, 84px);
-    right: calc(max(14px, env(safe-area-inset-right)) + min(15vw, 96px) + 10px); bottom: calc(14px + min(22vh, 84px) + 10px); font-size: 12px; }
-  #hud.autogas .boost-btn { right: calc(max(14px, env(safe-area-inset-right)) + min(15vw, 96px) + 10px); bottom: 14px; }
+  .boost-btn { position: absolute; left: auto; width: min(13vw, 84px); height: min(13vw, 84px); font-size: 12px;
+    right: calc(max(14px, env(safe-area-inset-right)) + min(15vw, 100px) / 2 + 4px); bottom: calc(14px + min(30vh, 118px) + 14px); }
+  #hud:not(.autogas) .boost-btn { right: calc(max(14px, env(safe-area-inset-right)) + min(14vw, 92px) + min(15vw, 100px) / 2 + 12px); }
   .hud-speed { right: 50%; transform: translateX(50%); bottom: 6px; text-align: center; }
   .hud-speed .v { font-size: 34px; }
   .hud-speed .hud-bar { justify-content: center; }
