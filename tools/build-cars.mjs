@@ -23,7 +23,7 @@ if (!lodsOnly && (!wantedArgs.length || wantedArgs.includes('rims'))) {
   fs.mkdirSync(outDir, { recursive: true });
   const out = path.join(outDir, 'rims.glb');
   execFileSync(BLENDER, ['--background', '--python', path.join(root, 'tools/blender/rims.py'), '--', raw], { env, stdio: 'pipe' });
-  execFileSync(GLTFPACK, ['-i', raw, '-o', out, '-cc', '-kn', '-km'], { env, stdio: 'pipe', shell: true });
+  execFileSync(GLTFPACK, ['-i', raw, '-o', out, '-cc', '-kn', '-km', '-vn', '12'], { env, stdio: 'pipe', shell: true });
   console.log(`rims: raw ${(fs.statSync(raw).size / 1024).toFixed(0)} KB → ${(fs.statSync(out).size / 1024).toFixed(0)} KB`);
 }
 
@@ -36,12 +36,12 @@ for (const file of scripts) {
   const out = path.join(OUT, `${name}.glb`);
   execFileSync(BLENDER, ['--background', '--python', path.join(root, 'tools/blender', file), '--', raw], { env, stdio: 'pipe' });
   // -cc: meshopt compression (high), quantised attributes; -kn/-km: keep node + material names (the game maps materials by name).
-  execFileSync(GLTFPACK, ['-i', raw, '-o', out, '-cc', '-kn', '-km'], { env, stdio: 'pipe', shell: true });
+  execFileSync(GLTFPACK, ['-i', raw, '-o', out, '-cc', '-kn', '-km', '-vn', '12'], { env, stdio: 'pipe', shell: true });
   console.log(`${name}: raw ${(fs.statSync(raw).size / 1024).toFixed(0)} KB → ${(fs.statSync(out).size / 1024).toFixed(0)} KB`);
   lowLod(name, raw);
 }
 
-// Light version (~16k triangles, at most a quarter of the full one) for phones / weak GPUs and the AI cars at medium quality.
+// Light version (~48k triangles, at most 30% of the full one; no aggressive mode: it broke the shading) for phones / weak GPUs and the AI cars at medium quality.
 function triangles(glb) {
   const b = fs.readFileSync(glb);
   const j = JSON.parse(b.subarray(20, 20 + b.readUInt32LE(12)).toString());
@@ -51,9 +51,9 @@ function triangles(glb) {
 }
 function lowLod(name, raw) {
   const lo = path.join(OUT, `${name}_lo.glb`);
-  const ratio = Math.min(0.25, 16000 / triangles(raw)).toFixed(3);
+  const ratio = Math.min(0.3, 48000 / triangles(raw)).toFixed(3);
   // -sa (aggressive) only for the detailed models: lets the simplifier merge across small parts.
-  execFileSync(GLTFPACK, ['-i', raw, '-o', lo, '-cc', '-kn', '-km', '-si', ratio, ...(+ratio < 0.25 ? ['-sa'] : [])], { env, stdio: 'pipe', shell: true });
+  execFileSync(GLTFPACK, ['-i', raw, '-o', lo, '-cc', '-kn', '-km', '-vn', '12', '-si', ratio, ], { env, stdio: 'pipe', shell: true });
   console.log(`${name}_lo: ${(fs.statSync(lo).size / 1024).toFixed(0)} KB`);
 }
 // Only the light versions, from the raw .glb files of the last build: node tools/build-cars.mjs --lods

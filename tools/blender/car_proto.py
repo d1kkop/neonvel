@@ -1,10 +1,11 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from carlib3 import Car3
+from carlib4 import Car4
 
 # Phantom LM — v3 Le Mans prototype: tall front fenders over a deep centre valley, narrow bubble canopy, rising
 # rear fenders around a spine with a shark fin, LED slot lamps, big carbon wing, diffuser and mesh rear grille.
-c = Car3('proto', dict(
+c = Car4('proto', dict(
+    subdiv=3, sculpt=dict(arch=0.04, waist=0.04, side=0.02, fender=0.03, tumble=0.9),
     preview_color=(0.35, 0.05, 0.4), rim='turbofan',
     keys=[
         dict(t=0.00, zb=0.14, hw=0.85, zw=0.22, scoop=0.0, sh=0.90, zsh=0.30, fx=0.82, zf=0.34, vx=0.50, zv=0.32, gb=0.30, zg=0.32, rw=0.15, zr=0.325, crown=0.003),
@@ -22,14 +23,15 @@ c = Car3('proto', dict(
     ],
     cabin=dict(ws=(0.295, 0.40), side=(0.402, 0.6), rear=(0.625, 0.66)),
     doors=(0.3, 0.55), bonnet=(0.03, 0.24), bonnet_w=0.4,
-    cage_along=38, crease_sill=0.9, crease_shoulder=0.8, crease_fender=0.6, crease_belt=0.6, end_crease=0.8,
+    cage_along=64, crease_sill=0.9, crease_shoulder=0.8, crease_fender=0.6, crease_belt=0.6, end_crease=0.8,
     nose_kx=0.85, nose_kz=0.8, nose_dt=0.012, tail_kx=0.88, tail_kz=0.88, tail_dt=0.01,
 ))
 c.body()
-c.led_headlights(x=0.68, z=0.42, w=0.34, h=0.07)
+c.projector_headlights(x=0.68, z=0.42, w=0.4, h=0.085)
 c.front_intakes(z=0.2)
 c.engine_louvres(0.72, 0.86, n=7, w=0.5)
-c.rear_end(z_lamp=0.74, z_grille=0.45)
+c.tail_lamp_strip(z=0.74, drop=0.14)
+c.rear_lower(z_grille=0.45)
 c.big_wing(t=0.96, height=0.3)
 c.box((0.025, 1.0, 0.24), (0, c.y(0.8), c.top_z(0, 0.8) + 0.1), 'paint', bevel=0.008)  # shark fin
 c.splitter3()

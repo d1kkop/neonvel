@@ -1,12 +1,13 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from carlib3 import Car3
+from carlib4 import Car4
 
 # Night Liner — v3 80s touring coach: raked one-piece windscreen, a long band of tinted side windows split by
 # slim pillars, a rounded roof cap with a lit destination sign, luggage-bay doors between the axles, big
 # rectangular lamps, chrome grille, black bumpers, square tail lamps.
 pillars = [0.16 + i * 0.09 for i in range(9)]
-c = Car3('bus', dict(
+c = Car4('bus', dict(
+    subdiv=3, sculpt=dict(side=0.01, tumble=0.97),
     preview_color=(0.1, 0.1, 0.3), rim='dish',
     keys=[
         dict(t=0.00, zb=0.45, hw=0.97, zw=0.90, scoop=0.0, sh=0.99, zsh=1.10, fx=0.98, zf=1.16, vx=0.95, zv=1.18, gb=0.92, zg=1.20, rw=0.88, zr=1.22, crown=0.01),
@@ -20,7 +21,7 @@ c = Car3('bus', dict(
     cabin=dict(ws=(0.007, 0.044), side=(0.05, 0.96), rear=(0.968, 0.994)),
     pillars=pillars, pillar_w=0.007, pillar_mat='trim', frame=0.035,
     doors=(0.06, 0.135), bonnet=False, bays=[0.27, 0.39, 0.51, 0.63],
-    cage_along=36, crease_sill=0.9, crease_shoulder=1.0, crease_fender=1.0, crease_belt=0.9, end_crease=0.9,
+    cage_along=56, crease_sill=0.9, crease_shoulder=1.0, crease_fender=1.0, crease_belt=0.9, end_crease=0.9,
     nose_kx=0.97, nose_kz=0.96, nose_dt=0.003, tail_kx=0.97, tail_kz=0.96, tail_dt=0.003, smooth_angle=35,
 ))
 c.body()

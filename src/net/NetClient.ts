@@ -18,6 +18,8 @@ export interface NetCarState {
   v: number;
   steer: number;
   drift: number;
+  /** Sender's clock (ms) when this state was taken: smooth timing however jittery the network is. */
+  t?: number;
 }
 
 /** Messages exchanged with the matchmaking server (see /server). */

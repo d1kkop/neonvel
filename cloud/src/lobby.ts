@@ -131,8 +131,9 @@ export class Lobby extends DurableObject<Env> {
         c.car = { id: allowed ? carId : 'vortex', paint: /^#[0-9a-f]{6}$/i.test(paint) ? paint : '' };
         const wait = Number(msg.wait);
         c.wait = [15, 30, 45].includes(wait) ? wait : 30;
+        // Already searching (e.g. the wait time was changed): keep the time waited so far.
+        if (c.queuedAt === null || c.inMatch) c.queuedAt = Date.now();
         c.inMatch = false;
-        c.queuedAt = Date.now();
         this.startTimer();
         await this.matchmake();
         break;
@@ -165,13 +166,12 @@ export class Lobby extends DurableObject<Env> {
         .filter((o) => { const d = Math.abs(o.player!.rating - ra); return d <= windowFor(anchor) && d <= windowFor(o); })
         .sort((a, b) => Math.abs(a.player!.rating - ra) - Math.abs(b.player!.rating - ra));
       if (!candidates.length) continue;
-      let group: Client[];
-      if (candidates.length >= MAX_PLAYERS - 1) group = [anchor, ...candidates.slice(0, MAX_PLAYERS - 1)];
-      else {
-        if (waitedFor(anchor) < anchor.wait) continue;
-        const ready = candidates.filter((o) => waitedFor(o) >= o.wait);
-        if (!ready.length) continue;
-        group = [anchor, ...ready];
+      // A full lobby starts at once. Otherwise the SHORTEST wait time in the group counts: as soon as everybody
+      // has waited that long, they race (30 s + 15 s → the race starts once both have waited 15 s).
+      const group = [anchor, ...candidates.slice(0, MAX_PLAYERS - 1)];
+      if (group.length < MAX_PLAYERS) {
+        const minWait = Math.min(...group.map((c) => c.wait));
+        if (!group.every((c) => waitedFor(c) >= minWait)) continue;
       }
       group.forEach((c) => used.add(c));
       await this.startMatch(group);

@@ -1,3 +1,4 @@
+import { startGamepadNav } from './gamepadNav';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { AMBIENCE_LABELS, AmbienceKind } from '../audio/Ambience';
@@ -65,6 +66,8 @@ export class App {
   private freeCam = false;
   private raceTime = 0;
   private countdown = 0;
+  /** Online countdown: wall-clock time (performance.now) of the green light. */
+  private goAt = 0;
   private lastCount = -1;
   private laps = 3;
   private lastLap = 1;
@@ -93,6 +96,7 @@ export class App {
       startRace: () => this.startRace(),
       findMatch: () => void this.findMatch(),
       cancelMatch: () => this.cancelMatch(),
+      matchWaitChanged: () => this.matchWaitChanged(),
       refreshLeaderboard: () => void this.refreshLeaderboard(),
       lapBoard: (level) => this.store.lapBoard(level, this.settings.authToken),
       signIn: (provider, devName) => this.store.signIn(provider, devName),
@@ -175,11 +179,11 @@ export class App {
     window.addEventListener('touchstart', unlock, { once: true });
     // GPU context lost → restored: rebuild the level, keep the race state.
     this.renderer.webgl.domElement.addEventListener('webglcontextrestored', () => this.recoverContext());
-    // Gamepad START = pause.
-    window.setInterval(() => {
-      const p = navigator.getGamepads?.()[0];
-      if (p?.buttons[9]?.pressed && (this.state === 'racing' || this.state === 'countdown') && !this.paused) this.pause();
-    }, 100);
+    // Gamepad: drives through Input; in the menus it navigates (A select, B back), START pauses a race.
+    startGamepadNav({
+      driving: () => (this.state === 'racing' || this.state === 'countdown') && !this.paused,
+      pause: () => this.pause(),
+    });
 
     this.menu.show('main');
     // Title background: built once, with the hand-modelled cars (waits up to 3 s for those small .glb files).
@@ -325,7 +329,9 @@ export class App {
     w.placeCars(0);
     this.compiling = true;
     void this.renderer.precompile(w.scene, this.camera).catch(() => undefined).finally(() => {
-      if (this.world === w) this.compiling = false;
+      if (this.world !== w) return;
+      this.carReflections(w);
+      this.compiling = false;
     });
   }
 
@@ -333,6 +339,12 @@ export class App {
 
   /** Debounced background-level preview (rebuilding a level is heavy; avoid doing it twice quickly). */
   private menuWeather: string | null = null;
+
+  /** The cars reflect the level itself (captured once per world); weak GPUs / phones keep the simple studio reflections. */
+  private carReflections(w: World): void {
+    if (this.settings.quality === 'low') return;
+    try { w.captureCarEnv(this.renderer.webgl, this.settings.quality === 'high' ? 512 : 256); } catch { /* keep the studio reflections */ }
+  }
 
   /** False until the first title background is built (menus asking for a background wait for it). */
   private bootDone = false;
@@ -380,6 +392,7 @@ export class App {
       } catch {
         /* compile lazily */
       }
+      if (this.world === w) this.carReflections(w);
       this.compiling = false;
       if (this.world !== w) return;
       this.laps = modeId === 'race' ? (this.settings.lapsByLevel?.[w.level.id] ?? defaultLaps(w.level.id)) : Infinity;
@@ -461,7 +474,8 @@ export class App {
       return;
     }
     if (this.state === 'countdown') {
-      this.countdown -= dt;
+      if (this.online && this.goAt) this.countdown = (this.goAt - performance.now()) / 1000;
+      else this.countdown -= dt;
       const n = Math.ceil(this.countdown);
       if (n !== this.lastCount) {
         this.lastCount = n;
@@ -509,9 +523,10 @@ export class App {
       for (const pop of this.mode.takePops()) this.hud.beatPop(pop.text, pop.good);
       if (this.mode.done) this.finishMode();
     }
-    if (this.online && ++this.netTick % 4 === 0) {
+    // 30 states a second (every second 60 Hz step), stamped with our clock.
+    if (this.online && ++this.netTick % 2 === 0) {
       const ph = p.phys;
-      this.net.send({ t: 'state', s: { s: ph.s, x: ph.x, psi: ph.psi, phi: ph.phi, v: ph.v, steer: ph.steer, drift: ph.driftAngle, b: ph.boosting ? 1 : 0 } });
+      this.net.send({ t: 'state', s: { s: ph.s, x: ph.x, psi: ph.psi, phi: ph.phi, v: ph.v, steer: ph.steer, drift: ph.driftAngle, b: ph.boosting ? 1 : 0, t: Math.round(performance.now()) } });
     }
     if (ev.playerWall > 0.05 && this.wallCooldown <= 0) {
       if (ev.playerWall > 0.5) this.audio.sfx?.impact(ev.playerWall);
@@ -1088,13 +1103,17 @@ export class App {
   // ------------------------------------------------------------- netplay
 
   private async ensureOnline(): Promise<boolean> {
-    try {
-      await this.net.connect();
-      this.net.send({ t: 'hello', token: this.settings.authToken });
-      return true;
-    } catch {
-      return false;
+    // The server may need a moment to wake up (its lobby starts on the first connection): 8 s, then one retry.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await this.net.connect(8000);
+        this.net.send({ t: 'hello', token: this.settings.authToken });
+        return true;
+      } catch {
+        /* try once more */
+      }
     }
+    return false;
   }
 
   private online: OnlineRace | null = null;
@@ -1127,6 +1146,7 @@ export class App {
       this.chase.update(w.player.car.group, 0, 1 / 60);
       this.compiling = true; // see startRace: no frame may draw the new world before its shaders are ready
       try { await this.renderer.precompile(w.scene, this.camera); } catch { /* lazy */ }
+      if (this.world === w) this.carReflections(w);
       this.compiling = false;
       if (!this.online || this.world !== w) return;
       this.laps = m.laps;
@@ -1151,6 +1171,9 @@ export class App {
     if (!this.online || (this.state !== 'netwait' && this.state !== 'loading')) return;
     this.hud.message('', 0.01);
     this.countdown = countdown;
+    // Online: the countdown runs on the wall clock from the moment 'go' arrived, not on simulated time — a slow
+    // frame, a shader hitch or a hidden tab would otherwise put one player a whole number behind the others.
+    this.goAt = performance.now() + countdown * 1000;
     this.lastCount = -1;
     this.state = 'countdown';
     this.audio.ui?.start();
@@ -1213,10 +1236,21 @@ export class App {
     }
     const carId = this.isOwned(this.settings.carId) ? this.settings.carId : 'vortex';
     this.net.send({ t: 'queue', wait: this.settings.matchWait ?? 30, car: { id: carId, paint: this.settings.carPaint[carId] ?? '' } });
+    this.searching = true;
     this.menu.setNetStatus('Searching for drivers near your rating…', true);
   }
 
+  /** Searching for a match right now (a changed wait time is sent straight away). */
+  private searching = false;
+
+  private matchWaitChanged(): void {
+    if (!this.searching || !this.net.connected) return;
+    const carId = this.isOwned(this.settings.carId) ? this.settings.carId : 'vortex';
+    this.net.send({ t: 'queue', wait: this.settings.matchWait ?? 30, car: { id: carId, paint: this.settings.carPaint[carId] ?? '' } });
+  }
+
   private cancelMatch(): void {
+    this.searching = false;
     if (this.net.connected) this.net.send({ t: 'cancel' });
     this.menu.setNetStatus('Matchmaking cancelled.');
   }
@@ -1256,6 +1290,7 @@ ${plan}`, true);
         }
         break;
       case 'match':
+        this.searching = false;
         this.menu.setNetStatus(`Match found: ${m.players.map((p) => `${p.name} (${p.rating})`).join(' vs ')}`);
         this.startOnline(m);
         break;

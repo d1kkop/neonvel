@@ -15,4 +15,6 @@ export const BOOST = {
   hitCooldown: 0.6,
   scrapeDrain: 0.25, // per second against a wall
   knockDrain: [0.03, 0.12] as const, // base + per impact strength, once per hard knock
+  emptyLock: 2.5, // seconds without any refill after boosting the bar completely empty
+  rearm: 0.2, // after running empty, boost only fires again from this much meter (no endless tiny boosts)
 };

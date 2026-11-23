@@ -201,7 +201,9 @@ export class PoleSnakes {
     /** Chance that it leaps to the other post instead of striking. */
     private readonly jumpChance = 0.5,
     /** Called when a strike reaches the car (the level slows the car down). */
-    private readonly onBite?: () => void) {
+    private readonly onBite?: () => void,
+    /** Chance that it does anything at all on a pass (otherwise it just sits coiled on its post). */
+    private readonly activeChance = 1) {
     this.group.name = 'pole-snakes';
     const rings = 110, around = 10;
     const pos: number[] = [], idx: number[] = [];
@@ -371,6 +373,7 @@ export class PoleSnakes {
       const lead = Math.max(24, speed * 0.72);
       if (sn.armed && ahead < lead && ahead > -2 && speed > 8) {
         sn.armed = false;
+        if (Math.random() > this.activeChance) continue; // stays put this time (no hiss)
         if (sn.pole.other && ahead > 16 && Math.random() < this.jumpChance) {
           sn.jumping = true;
           sn.t = 0;
@@ -502,7 +505,7 @@ export class BirdFlock {
   private readonly prev = new THREE.Vector3();
   onHit?: () => void;
 
-  constructor(count = 42, private readonly radius = 150, private readonly height = 42) {
+  constructor(count = 42, private readonly radius = 150, private readonly height = 62) {
     const b = birdMesh(count, '#0c0a0e', 0);
     const u = (b.mesh.material as THREE.ShaderMaterial).uniforms;
     u.uSize.value = 2.4;
@@ -530,9 +533,10 @@ export class BirdFlock {
       const lead = speed * 2.0;
       const p = around.clone().addScaledVector(fwd, lead);
       const side = Math.random() < 0.5 ? -1 : 1;
-      this.pass = { t: 0, from: this.center.clone(), a: p.clone().addScaledVector(right, side * 26).setY(around.y + 2.6), b: p.clone().addScaledVector(right, -side * 26).setY(around.y + 2.4), hit: false };
+      // Stays over the road (dunes / rocks beside it are higher than the road): from one edge to the other.
+      this.pass = { t: 0, from: this.center.clone(), a: p.clone().addScaledVector(right, side * 13).setY(around.y + 3.4), b: p.clone().addScaledVector(right, -side * 13).setY(around.y + 3.2), hit: false };
     }
-    const tight = new THREE.Vector3(7, 1.6, 5), loose = new THREE.Vector3(34, 9, 26);
+    const tight = new THREE.Vector3(5, 1.2, 5), loose = new THREE.Vector3(34, 8, 26);
     if (this.pass) {
       const ps = this.pass;
       ps.t += dt;

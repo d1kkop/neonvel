@@ -1,12 +1,13 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from carlib3 import Car3
+from carlib4 import Car4
 
 # Nordring 2.5 (Pocket line) - late-80s touring-car-style sport sedan, period spirit (no real design copied):
 # compact two-door three-box, squared box flares over all four wheels, a band of quad round lamps either side of
 # a slim slatted grille, deep black air dam and bumpers, short high boot with a body-colour wing, cross-spoke rims.
 F1, F2 = 0.18, 0.80  # axle stations (from styles.json wheelT)
-c = Car3('hatch', dict(
+c = Car4('hatch', dict(
+    subdiv=3, sculpt=dict(arch=0.06, waist=0.015, side=0.02, fender=0.02, tumble=0.88),
     preview_color=(0.9, 0.9, 0.92), rim='mesh',
     keys=[
         dict(t=0.00, zb=0.27, hw=0.91, zw=0.48, scoop=0.0, sh=0.985, zsh=0.70, fx=0.96, zf=0.74, vx=0.86, zv=0.745, gb=0.60, zg=0.745, rw=0.30, zr=0.75, crown=0.004),
@@ -34,7 +35,7 @@ c = Car3('hatch', dict(
     cabin=dict(ws=(0.28, 0.395), side=(0.4, 0.665), rear=(0.67, 0.8)),
     pillars=[0.575], pillar_w=0.014, pillar_mat='trim',
     doors=(0.28, 0.575), bonnet=(0.025, 0.265), bonnet_w=0.8, bonnet_front=True, boot=(0.82, 0.975), boot_w=0.78,
-    cage_along=46, crease_sill=0.9, crease_shoulder=1.0, crease_fender=0.95, crease_belt=0.85, end_crease=0.95,
+    cage_along=64, crease_sill=0.9, crease_shoulder=1.0, crease_fender=0.95, crease_belt=0.85, end_crease=0.95,
     nose_kx=0.95, nose_kz=0.93, nose_dt=0.005, tail_kx=0.95, tail_kz=0.93, tail_dt=0.005, smooth_angle=33,
 ))
 c.body()

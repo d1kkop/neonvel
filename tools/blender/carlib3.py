@@ -154,6 +154,7 @@ class Car3(Car2):
         # Creases: character lines along the car.
         cl = bm.edges.layers.float.get('crease_edge') or bm.edges.layers.float.new('crease_edge')
         cw = {2: d.get('crease_sill', 0.8), 5: d.get('crease_shoulder', 0.7), 6: d.get('crease_fender', 0.3), 8: d.get('crease_belt', 0.5)}
+        cw.update(d.get('creases', {}))  # extra / stronger character lines (profile point -> crease weight)
         for a, b in zip(rings[1:-1], rings[2:-1]):
             for j in range(n):
                 w = cw.get(pidx(j))

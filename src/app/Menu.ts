@@ -25,6 +25,8 @@ export type ScreenName = 'main' | 'quick' | 'garage' | 'netplay' | 'leaderboard'
 export interface MenuHandlers {
   startRace(): void;
   findMatch(): void;
+  /** The wait time was changed (while searching it is sent at once). */
+  matchWaitChanged?(): void;
   cancelMatch(): void;
   refreshLeaderboard(): void;
   /** A track's fastest-lap board (null = server offline). */
@@ -462,6 +464,7 @@ export class Menu {
     el.querySelectorAll<HTMLElement>('[data-wait]').forEach((c) => c.addEventListener('click', () => {
       s.matchWait = +c.dataset.wait! as Settings['matchWait'];
       this.commit(); this.h.sound('select');
+      this.h.matchWaitChanged?.(); // already searching: the new wait time applies at once
       el.querySelectorAll<HTMLElement>('[data-wait]').forEach((b) => b.classList.toggle('on', b === c));
     }));
     el.querySelector('[data-act=refresh]')!.addEventListener('click', () => { this.h.sound('select'); this.h.refreshLeaderboard(); });
@@ -583,8 +586,7 @@ export class Menu {
             ? 'Steer hard + tap brake / SPACE at speed to slide; keep steering to hold the drift.'
             : 'Planted and precise. SPACE (handbrake) still kicks the tail out.'}</span></div>
         <div class="row"><span class="label">Lighting</span>
-          <input type="range" min="0.5" max="1" step="0.05" value="${s.lighting ?? 1}" data-lighting>
-          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">Glow and brightness of the lights. Full (right) is how the game is meant to look; slide left if it is too much for you.</span></div>
+          <input type="range" min="0.5" max="1" step="0.05" value="${s.lighting ?? 1}" data-lighting></div>
         <div class="row"><span class="label">Beat lights</span>
           <button class="chip ${(s.beatSides ?? 1) === 1 ? 'on' : ''}" data-beatsides="1">One side</button>
           <button class="chip ${s.beatSides === 2 ? 'on' : ''}" data-beatsides="2">Both sides</button>

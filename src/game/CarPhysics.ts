@@ -34,6 +34,9 @@ export interface CarPhys {
   boosting: boolean;
   /** Seconds until a car-to-car hit may give boost again. */
   boostHitCd: number;
+  /** Boosted the bar empty: seconds left without refill, and boost stays off until the bar is back at BOOST.rearm. */
+  boostLock?: number;
+  boostEmpty?: boolean;
   /** Was against a wall last step (a hard knock drains boost once, scraping drains steadily). */
   onWall: boolean;
   // previous step (interpolation)
@@ -85,7 +88,7 @@ export { BOOST } from './boostRules';
 
 /** A car-to-car hit: both cars earn a little boost (with a cooldown so leaning on someone doesn't farm it). */
 export function boostFromHit(c: CarPhys, strength: number): void {
-  if (c.boostHitCd > 0 || strength < 0.05) return;
+  if (c.boostHitCd > 0 || strength < 0.05 || (c.boostLock ?? 0) > 0) return;
   c.boost = Math.min(1, c.boost + BOOST.hitGain * Math.min(1, 0.4 + strength * 1.5));
   c.boostHitCd = BOOST.hitCooldown;
 }
@@ -108,9 +111,14 @@ export function stepPhys(c: CarPhys, inp: InputState & { handbrake?: number; boo
   // --- Boost
   c.boostHitCd = Math.max(0, c.boostHitCd - dt);
   const wasBoosting = c.boosting;
-  c.boosting = (inp.boost ?? 0) > 0.5 && c.boost > 0.005 && c.v > 3;
+  if (c.boostEmpty && c.boost >= BOOST.rearm) c.boostEmpty = false;
+  c.boosting = (inp.boost ?? 0) > 0.5 && c.boost > 0.005 && c.v > 3 && !c.boostEmpty;
   if (c.boosting && !wasBoosting) { c.v += BOOST.kick; c.boost = Math.max(0, c.boost - BOOST.kickCost); } // the shove costs a bit, so tapping does not farm it
   if (c.boosting) c.boost = Math.max(0, c.boost - BOOST.burn * dt);
+  // Boosted it empty: a pause before the bar refills, and no new boost until it is back at BOOST.rearm.
+  if (c.boosting && c.boost <= 0.005) { c.boost = 0; c.boosting = false; c.boostEmpty = true; c.boostLock = BOOST.emptyLock; }
+  const boost0 = c.boost;
+  c.boostLock = Math.max(0, (c.boostLock ?? 0) - dt);
   const top = spec.topSpeed * (c.boosting ? BOOST.top : 1);
 
   // --- Longitudinal
@@ -291,6 +299,7 @@ export function stepPhys(c: CarPhys, inp: InputState & { handbrake?: number; boo
 
   c.latAcc = c.v * c.yawRate;
   c.lonAcc = (c.v - v0) / dt;
+  if ((c.boostLock ?? 0) > 0 && c.boost > boost0) c.boost = boost0; // no refill yet after running empty
 }
 
 /**

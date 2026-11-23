@@ -161,10 +161,10 @@ export const desertMirage: LevelDef = {
     // Rattlesnakes: three of them round the lap, each coiled round a street-lamp post (the posts stand every
     // 40 m on the barrier, right-hand ones on the 40 m marks, left-hand ones in between).
     const snakePoles: SnakePole[] = [];
-    for (let k = 0; k < 5; k++) {
+    for (let k = 0; k < 2; k++) {
       const side = rng.chance(0.5) ? 1 : -1;
       const sp = ROAD_STYLE.lightSpacing;
-      let d = Math.round(((k + 0.55) * track.length) / 5 / sp) * sp + (side < 0 ? sp / 2 : 0);
+      let d = Math.round(((k + 0.55) * track.length) / 2 / sp) * sp + (side < 0 ? sp / 2 : 0);
       for (let tries = 0; tries < 8 && track.sectionAt(d, 45); tries++) d += sp;
       if (track.sectionAt(d, 45)) continue;
       // Its post, and the nearest post on the other side of the road, 20 m back toward the oncoming car: the leap
@@ -176,7 +176,8 @@ export const desertMirage: LevelDef = {
       };
       snakePoles.push({ ...post(d, side), other: track.sectionAt(d - sp / 2, 8) ? undefined : post(d - sp / 2, -side) });
     }
-    const snakes = new PoleSnakes(snakePoles, track.length, () => ctx.sound?.('hiss'), 0.5, () => ctx.hitPlayer?.(0.3, 'SNAKE BITE!'));
+    // Two snakes a lap, each acting on about half the passes, a leap now and then: a surprise, not every few seconds.
+    const snakes = new PoleSnakes(snakePoles, track.length, () => ctx.sound?.('hiss'), 0.3, () => ctx.hitPlayer?.(0.3, 'SNAKE BITE!'), 0.5);
     scene.add(snakes.group);
 
     // Eagles: perched right on the edge of four mesa tops, on the side facing the road, heads following the

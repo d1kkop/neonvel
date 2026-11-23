@@ -1,11 +1,12 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from carlib3 import Car3
+from carlib4 import Car4
 
 # Nocturne (Velvet line) - mid-80s two-seat kammback, period spirit (no real design copied): low wedge nose with
 # flush wide lamps and amber corners, a slim slot grille, steep raked windshield, short roof falling into a long
 # glass hatch, chopped vertical tail with a full-width lamp band, black bumpers with a deep air dam, flat-face rims.
-c = Car3('coupe', dict(
+c = Car4('coupe', dict(
+    subdiv=3, sculpt=dict(arch=0.045, waist=0.025, side=0.03, fender=0.025, tumble=0.88),
     preview_color=(0.02, 0.02, 0.025), rim='dish',
     keys=[
         dict(t=0.00, zb=0.25, hw=0.88, zw=0.40, scoop=0.0, sh=0.98, zsh=0.52, fx=0.95, zf=0.55, vx=0.84, zv=0.555, gb=0.60, zg=0.555, rw=0.30, zr=0.56, crown=0.004),
@@ -23,7 +24,7 @@ c = Car3('coupe', dict(
     cabin=dict(ws=(0.31, 0.47), side=(0.475, 0.83), rear=(0.6, 0.915)),
     pillars=[0.64], pillar_w=0.014, pillar_mat='trim',
     doors=(0.31, 0.64), bonnet=(0.03, 0.29), bonnet_w=0.78, bonnet_front=True,
-    cage_along=46, crease_sill=0.9, crease_shoulder=0.95, crease_fender=0.85, crease_belt=0.8, end_crease=0.9,
+    cage_along=64, crease_sill=0.9, crease_shoulder=0.95, crease_fender=0.85, crease_belt=0.8, end_crease=0.9,
     nose_kx=0.94, nose_kz=0.9, nose_dt=0.006, tail_kx=0.95, tail_kz=0.93, tail_dt=0.005, smooth_angle=34,
 ))
 c.body()

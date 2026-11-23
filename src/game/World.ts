@@ -39,6 +39,10 @@ export interface CarEntry {
   netId?: string;
   remote?: boolean;
   snaps?: { t: number; st: NetCarState }[];
+  /** Remote cars: sender-clock offset (ms), smoothed correction of jumps, previous target (dead reckoning). */
+  netOff?: number;
+  netErr?: { s: number; x: number; psi: number };
+  netPrev?: NetCarState;
   left?: boolean;
   visRoll?: number;
   visPitch?: number;
@@ -289,7 +293,7 @@ export class World {
   step(dt: number, playerInput: (InputState & { handbrake?: number }) | null, frozen = false): StepEvents {
     const ev: StepEvents = { playerWall: 0, playerHit: 0, npcHits: [] };
     const phys = this.cars.map((c) => c.phys);
-    this.updateRemotes();
+    this.updateRemotes(dt);
     for (const c of this.cars) {
       if (c.remote) continue;
       let inp: InputState & { handbrake?: number };
@@ -386,8 +390,17 @@ export class World {
   applyRemote(id: string, st: NetCarState): void {
     const c = this.cars.find((x) => x.netId === id);
     if (!c?.snaps) return;
-    c.snaps.push({ t: performance.now(), st });
-    if (c.snaps.length > 30) c.snaps.shift();
+    const now = performance.now();
+    let t = now;
+    if (typeof st.t === 'number') {
+      // Offset between their clock and ours = the quickest delivery seen (drifts up slowly so it can follow).
+      const off = now - st.t;
+      c.netOff = c.netOff === undefined ? off : Math.min(c.netOff + 0.05, off);
+      t = st.t + c.netOff;
+    }
+    if (c.snaps.length && t <= c.snaps[c.snaps.length - 1].t) return; // old / duplicate
+    c.snaps.push({ t, st });
+    if (c.snaps.length > 40) c.snaps.shift();
   }
 
   /** Mark a remote player as gone (hidden, out of the standings). */
@@ -398,13 +411,19 @@ export class World {
     c.car.group.visible = false;
   }
 
-  /** Remote cars: interpolate 100 ms in the past between snapshots, extrapolate briefly if late. */
-  private updateRemotes(): void {
-    const renderT = performance.now() - 100;
+  /**
+   * Remote cars, shown where they are NOW (so racing side by side and collisions match what the other player sees):
+   * between snapshots when there is one just ahead, otherwise dead reckoning from the latest one along the track.
+   * A new snapshot that changes the predicted path is blended in smoothly instead of making the car jump; body
+   * roll / pitch come from the car's own motion (so it leans and dips like a driven car, not a floating one).
+   */
+  private updateRemotes(dt = 1 / 60): void {
+    const renderT = performance.now() - 35;
     for (const c of this.cars) {
       if (!c.remote || !c.snaps || c.snaps.length === 0) continue;
       const p = c.phys;
       p.ps = p.s; p.px = p.x; p.ppsi = p.psi;
+      const prevV = p.v, prevPsi = p.psi;
       const snaps = c.snaps;
       let a = snaps[0], b = snaps[snaps.length - 1];
       for (let k = snaps.length - 1; k > 0; k--) {
@@ -412,16 +431,33 @@ export class World {
       }
       let st: NetCarState;
       if (renderT >= b.t) {
-        // Late packet: extrapolate up to 0.5 s along the track.
-        const dt = Math.min(0.5, (renderT - b.t) / 1000);
-        st = { ...b.st, s: b.st.s + b.st.v * Math.cos(b.st.phi) * dt };
+        // Ahead of the latest snapshot: carry on along the track at its speed and slip angle (up to 0.5 s).
+        const ex = Math.min(0.5, (renderT - b.t) / 1000);
+        st = { ...b.st, s: b.st.s + b.st.v * Math.cos(b.st.phi) * ex, x: b.st.x + b.st.v * Math.sin(b.st.phi) * ex };
       } else {
         const k = b.t > a.t ? Math.max(0, Math.min(1, (renderT - a.t) / (b.t - a.t))) : 1;
         const L = (u: number, v: number) => u + (v - u) * k;
         st = { s: L(a.st.s, b.st.s), x: L(a.st.x, b.st.x), psi: L(a.st.psi, b.st.psi), phi: L(a.st.phi, b.st.phi), v: L(a.st.v, b.st.v), steer: L(a.st.steer, b.st.steer), drift: L(a.st.drift, b.st.drift), b: k < 0.5 ? a.st.b : b.st.b };
       }
-      p.s = st.s; p.x = st.x; p.psi = st.psi; p.phi = st.phi; p.v = st.v; p.steer = st.steer; p.driftAngle = st.drift; p.boosting = !!st.b;
+      // Smooth corrections: where the new target departs from where the previous one was heading, keep the car
+      // on its line and fade the difference out over ~0.15 s.
+      const prev = c.netPrev;
+      c.netErr ??= { s: 0, x: 0, psi: 0 };
+      const e = c.netErr, decay = Math.exp(-dt * 7);
+      if (prev) {
+        const advS = prev.s + prev.v * Math.cos(prev.phi) * dt, advX = prev.x + prev.v * Math.sin(prev.phi) * dt;
+        const js = advS - st.s, jx = advX - st.x, jp = prev.psi - st.psi;
+        e.s = Math.abs(js) < 25 ? (e.s + js) * decay : 0; // a big jump (respawn, long gap): just go there
+        e.x = Math.abs(jx) < 6 ? (e.x + jx) * decay : 0;
+        e.psi = Math.abs(jp) < 0.6 ? (e.psi + jp) * decay : 0;
+      }
+      c.netPrev = st;
+      p.s = st.s + e.s; p.x = st.x + e.x; p.psi = st.psi + e.psi; p.phi = st.phi; p.v = st.v; p.steer = st.steer; p.driftAngle = st.drift; p.boosting = !!st.b;
       if (p.ps === 0 && p.px === 0) { p.ps = p.s; p.px = p.x; p.ppsi = p.psi; }
+      // Motion → body roll / pitch (the local cars get these from their physics).
+      const yawRate = (p.psi - prevPsi) / dt + p.v * this.track.curvatureAt(p.s);
+      p.latAcc += (p.v * yawRate - p.latAcc) * (1 - Math.exp(-dt * 6));
+      p.lonAcc += ((p.v - prevV) / dt - p.lonAcc) * (1 - Math.exp(-dt * 6));
     }
   }
 
@@ -525,7 +561,47 @@ export class World {
     for (const fn of this.updaters) fn(this.time, dt);
   }
 
+  /** The level itself, captured once from the road: what the cars' paint and glass reflect. */
+  private carEnv: THREE.WebGLRenderTarget | null = null;
+
+  /**
+   * Real reflections: render the level once into a cube map from just above the road (cars hidden), filter it for
+   * glossy reflections (PMREM) and give it to the car materials, so the paint mirrors this world's neon, sunset or
+   * ocean instead of the generic studio environment. Called after the shaders are compiled (no load hitch).
+   */
+  captureCarEnv(renderer: THREE.WebGLRenderer, size = 256): void {
+    if (this.carEnv) return;
+    const cube = new THREE.WebGLCubeRenderTarget(size, { type: THREE.HalfFloatType, generateMipmaps: false });
+    const cam = new THREE.CubeCamera(0.5, 4000, cube);
+    const s = (this.cars[0]?.phys.s ?? 0) + 40;
+    this.track.frameAt(s, this.frame);
+    cam.position.copy(this.frame.position).add(new THREE.Vector3(0, 2.2, 0));
+    const hidden = [...this.cars, ...this.npcs].map((c) => c.car.group).filter((g) => g.visible);
+    hidden.forEach((g) => (g.visible = false));
+    this.scene.add(cam);
+    const prevTarget = renderer.getRenderTarget();
+    cam.update(renderer, this.scene);
+    renderer.setRenderTarget(prevTarget);
+    this.scene.remove(cam);
+    hidden.forEach((g) => (g.visible = true));
+    const pm = new THREE.PMREMGenerator(renderer);
+    this.carEnv = pm.fromCubemap(cube.texture);
+    pm.dispose();
+    cube.dispose();
+    const env = this.carEnv.texture;
+    for (const c of [...this.cars, ...this.npcs]) {
+      c.car.group.traverse((o) => {
+        const mats = (o as THREE.Mesh).material;
+        for (const m of Array.isArray(mats) ? mats : mats ? [mats] : []) {
+          const sm = m as THREE.MeshStandardMaterial;
+          if (sm.isMeshStandardMaterial) { sm.envMap = env; sm.needsUpdate = true; }
+        }
+      });
+    }
+  }
+
   dispose(): void {
+    this.carEnv?.dispose();
     this.scene.traverse((o) => {
       if ((o as THREE.InstancedMesh).isInstancedMesh) (o as THREE.InstancedMesh).dispose();
       const m = o as THREE.Mesh;

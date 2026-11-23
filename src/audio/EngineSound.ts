@@ -331,13 +331,13 @@ export class EngineSound {
     this.rpmNow = p.idle;
     this.previewTimer = window.setInterval(() => {
       const t = (performance.now() - t0) / 1000;
-      // 0.5 s at idle, 5.5 s flat out up to 75 % of top speed (every gear pulled to just under the redline),
-      // then off the throttle.
-      const run = Math.max(0, Math.min(1, (t - 0.5) / 5.5));
-      const coast = Math.max(0, t - 6);
-      const speed = t < 0.5 ? 0 : Math.max(0.04, 0.75 * Math.pow(run, 0.9) - coast * 0.14);
-      this.update({ rpm: 900, throttle: t > 0.5 && t < 6 ? 1 : 0, gear: 1, slip: 0, speed01: speed }, true, 0.03);
-      if (t > 7) {
+      // 0.5 s at idle, then 6.5 s flat out up to half the top speed: a long first gear revved high, then about 1.5 s
+      // per gear, each one climbing to just under the redline before the shift (no short-shifting); then lift off.
+      const run = Math.max(0, Math.min(1, (t - 0.5) / 6.5));
+      const coast = Math.max(0, t - 7);
+      const speed = t < 0.5 ? 0 : Math.max(0.03, 0.5 * run - coast * 0.12);
+      this.update({ rpm: 900, throttle: t > 0.5 && t < 7 ? 1 : 0, gear: 1, slip: 0, speed01: speed }, true, 0.03);
+      if (t > 8) {
         window.clearInterval(this.previewTimer);
         this.previewing = false;
         this.setActive(false);
