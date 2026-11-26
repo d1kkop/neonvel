@@ -870,7 +870,6 @@ export class App {
       accent: m.accent,
       name: m.name,
       tier: m.tier,
-      driftMode: this.settings.driveMode === 'drift',
       spec: specFor(m),
     };
   }

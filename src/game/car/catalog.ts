@@ -1,6 +1,6 @@
 /**
  * The garage line-up. Stats are 0..10 bars shown in the UI and mapped onto the physics spec.
- * Listed from the slowest to the best (stats only go up down the list); the Night Liner bus is its own class.
+ * Listed from the slowest to the best (stats only go up down the list).
  */
 export interface CarModel {
   id: string;
@@ -24,22 +24,15 @@ export interface CarModel {
 }
 
 export const CARS: CarModel[] = [
-  // Ordered from the slowest to the best: every step down the list is a better car.
-  // Free starters.
-  { id: 'velvet', name: 'Nocturne', style: 'coupe', paint: '#0c0c10', accent: '#ff2bd6', stats: { speed: 4, accel: 5, grip: 6 }, engine: 'turbo4', price: 0, tier: 'free', blurb: 'Mid-80s two-seat kammback in gloss black: wedge nose, glass hatch, chopped tail. Light, nimble and forgiving.' },
-  { id: 'pocket', name: 'Nordring 2.5', style: 'hatch', paint: '#f2f2f4', accent: '#00e5ff', stats: { speed: 5, accel: 6, grip: 6 }, engine: 'i4sport', price: 0, tier: 'free', blurb: 'Late-80s touring-car sedan: box flares, quad lamps, boot wing and a screaming four. Small, light, eager.' },
-  { id: 'vortex', name: 'Vortex GT-R', style: 'wedge', paint: '#c8ff00', accent: '#00e5ff', stats: { speed: 6, accel: 6, grip: 6 }, engine: 'flat12', price: 0, tier: 'free', blurb: 'Pop-up wedge. Honest and balanced, with a real top end.' },
-  // Locked ($0.50).
-  { id: 'thunder', name: 'Thunder 454', style: 'muscle', paint: '#b3121c', accent: '#ffffff', stats: { speed: 7, accel: 7, grip: 6 }, engine: 'v8muscle', price: 50, tier: 'pro', blurb: 'Red big-block muscle with white racing stripes, a cowl scoop and fat rear hips. Brutal off the line, a handful in the bends.' },
-  { id: 'cruiser', name: 'Midnight Cruiser', style: 'gt', paint: '#1c1640', accent: '#a64dff', stats: { speed: 8, accel: 7, grip: 7 }, engine: 'v12', price: 50, tier: 'pro', blurb: 'Long, low 80s luxury GT in midnight indigo: fastback roof, slim lamps, effortless top speed.' },
-  { id: 'razor', name: 'Razor X', style: 'razor', paint: '#f5f5f5', accent: '#ff3b5c', stats: { speed: 8, accel: 8, grip: 8 }, engine: 'v10', price: 100, tier: 'pro', blurb: 'Knife-edge V10 supercar wedge. Fast everywhere.' },
-  // ELITE ($1.50): the best.
-  { id: 'phantom', name: 'Phantom LM', style: 'proto', paint: '#0b0b12', accent: '#00e5ff', stats: { speed: 9, accel: 9, grip: 9 }, engine: 'racev8', price: 150, tier: 'elite', blurb: 'Le Mans prototype. Iridescent stealth paint, screaming race V8, near-perfect in every corner.' },
-  { id: 'aurum', name: 'Aurum Hyper', style: 'hyper', paint: '#d4a017', accent: '#ff2bd6', stats: { speed: 10, accel: 10, grip: 9 }, engine: 'w16', price: 150, tier: 'elite', blurb: 'W16 quad-turbo in pearlescent gold. The fastest car in the game.' },
-  // The bus ($1.50): its own class — drive it and everyone else is in a bus too (online as well).
-  { id: 'bus', name: 'Night Liner', style: 'bus', paint: '#e8b020', accent: '#ff2bd6', stats: { speed: 3, accel: 2, grip: 3 }, engine: 'diesel6', price: 150, tier: 'elite', class: 'bus',
-    specOverride: { topSpeed: 50, accel: 7, brake: 20, grip: 15, wheelbase: 6.2, maxSteer: 0.5 },
-    blurb: '11 metres of 80s touring coach. Its own race class: slow to get going, leans into every bend — and every other racer gets a bus too.' },
+  // Ordered from the slowest to the best: every step down the list is a better car. Models: the 90s pack
+  // (tools/build-cars.mjs). Free: the first four. Paid: the last three ($0.50 / $1.00 / $1.50).
+  { id: 'velvet', name: 'Asti HF', style: 'asti', paint: '#a3261c', accent: '#ff2bd6', stats: { speed: 4, accel: 5, grip: 6 }, engine: 'i4sport', price: 0, tier: 'free', blurb: 'Boxy rally-bred hot hatch: flared arches, a roof spoiler and a turbo four that loves to rev. Light, nimble, forgiving.' },
+  { id: 'pocket', name: 'Phoenix', style: 'phoenix', paint: '#b08d57', accent: '#00e5ff', stats: { speed: 5, accel: 5, grip: 6 }, engine: 'v8muscle', price: 0, tier: 'free', blurb: 'Late-70s pony car in champagne gold: long bonnet, shaker scoop, lazy V8 torque.' },
+  { id: 'vortex', name: 'Gallo 99', style: 'gallo', paint: '#24497e', accent: '#00e5ff', stats: { speed: 6, accel: 6, grip: 6 }, engine: 'turbo4', price: 0, tier: 'free', blurb: 'Late-90s twin-turbo coupé with a big rear wing. Balanced and honest, with a real top end.' },
+  { id: 'thunder', name: 'Duke 69', style: 'duke', paint: '#8b8e92', accent: '#ffffff', stats: { speed: 7, accel: 7, grip: 6 }, engine: 'v8muscle', price: 0, tier: 'free', blurb: 'Big-block muscle in gunmetal silver: hidden grille, fat tyres, brutal off the line, a handful in the bends.' },
+  { id: 'cruiser', name: 'Duntov', style: 'duntov', paint: '#4c2340', accent: '#a64dff', stats: { speed: 8, accel: 7, grip: 7 }, engine: 'v12', price: 50, tier: 'pro', blurb: 'Late-50s roadster coupé in plum with white coves and chrome teeth. Old money, surprising pace.' },
+  { id: 'razor', name: 'Cheetah', style: 'cheetah', paint: '#9e1d1d', accent: '#ff3b5c', stats: { speed: 8, accel: 8, grip: 8 }, engine: 'flat12', price: 100, tier: 'pro', blurb: 'Flat-twelve wedge with side strakes and a wide hip. Fast everywhere.' },
+  { id: 'aurum', name: 'NFR', style: 'nfr', paint: '#c4561a', accent: '#ff2bd6', stats: { speed: 10, accel: 10, grip: 9 }, engine: 'v10', price: 150, tier: 'elite', blurb: 'Mid-engined 90s supercar in burnt orange: pop-up lamps, a screaming V10. The fastest car in the game.' },
 ];
 
 /** Physics spec for a vehicle: stats mapped onto the spec, plus its own overrides (bus). */

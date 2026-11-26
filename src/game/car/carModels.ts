@@ -6,14 +6,14 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
  * Hand-modelled (Blender) car bodies, loaded as small compressed .glb files from public/models/cars/.
  * Optional: a car style without a model (or a failed download) keeps its procedural body.
  */
-const AVAILABLE = ['wedge', 'muscle', 'coupe', 'hatch', 'gt', 'razor', 'proto', 'hyper', 'bus']; // body styles with a model (tools/blender/car_<style>.py)
+const AVAILABLE = ['asti', 'phoenix', 'gallo', 'duke', 'duntov', 'cheetah', 'nfr']; // body styles with a model (tools/build-cars.mjs)
 const STYLE_FOR: Record<string, string> = {}; // body style → model file (default: same name)
 
 const models = new Map<string, THREE.Object3D>();
 /** Light versions (`<style>_lo.glb`, about a third of the triangles): phones, weak GPUs, AI cars. */
 const lowModels = new Map<string, THREE.Object3D>();
 let loadingHigh: Promise<void> | null = null;
-/** Rim designs (tools/blender/rims.py): style → its meshes (one per material), modelled for RIM_MODEL_RADIUS. */
+/** Modelled rim designs (none at the moment: the procedural rims are used): style → its meshes, modelled for RIM_MODEL_RADIUS. */
 const rims = new Map<string, THREE.Mesh[]>();
 /** Lip radius the rims were modelled at (the car builder scales them to its own rim radius). */
 export const RIM_MODEL_RADIUS = 0.27;
@@ -56,26 +56,6 @@ export function preloadCarModels(withHigh = true): Promise<void> {
             lowModels.set(name, g.scene);
           })
           .catch(() => undefined), // fall back to the procedural body
-      ).concat(
-        loader.loadAsync(`${base}models/wheels/rims.glb`)
-          .then((g) => {
-            dequantise(g.scene);
-            g.scene.updateMatrixWorld(true);
-            g.scene.traverse((o) => {
-              const style = /^rim_([a-z0-9]+)/.exec(o.name)?.[1];
-              if (!style || rims.has(style)) return;
-              // The rim's meshes (one per material), with their transform baked in.
-              const parts: THREE.Mesh[] = [];
-              o.traverse((c) => {
-                const m = c as THREE.Mesh;
-                if (!m.isMesh) return;
-                const mesh = new THREE.Mesh(m.geometry.clone().applyMatrix4(m.matrixWorld), m.material);
-                parts.push(mesh);
-              });
-              if (parts.length) rims.set(style, parts);
-            });
-          })
-          .catch(() => undefined), // fall back to the procedural rims
       ),
     ).then(() => undefined);
   }

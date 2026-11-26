@@ -37,6 +37,22 @@ export interface CarStyle {
   archSquare?: number;
   /** Rim design. */
   rim?: RimStyle;
+  /** Bought / hand-made model (public/models/cars/<name>.glb) brings its own body, wheels and lamps: real proportions, not raised. */
+  model?: boolean;
+}
+
+/**
+ * A style for a complete model: length / width / wheels are the model's real measurements (the wheels and lamps
+ * are read from the model itself); the station tables only matter if the model failed to load.
+ */
+function modelStyle(name: string, length: number, width: number, wheelRadius: number, wheelT: [number, number]): CarStyle {
+  return {
+    name, model: true, length, width, wheelRadius, wheelT, rim: 'star5',
+    body: [[0.0, 0.55, 0.3, 0.9], [0.04, 0.68, 0.26, 0.98], [0.3, 0.78, 0.25, 1.0], [0.65, 0.82, 0.25, 1.0], [0.96, 0.84, 0.27, 1.0], [1.0, 0.8, 0.34, 0.97]],
+    bodyExp: 10, bodyTumble: 0.1,
+    cabin: [[0.34, 0.8, 0.74, 0.8], [0.44, 1.18, 0.76, 0.76], [0.7, 1.2, 0.78, 0.74], [0.8, 0.98, 0.79, 0.72], [0.84, 0.84, 0.8, 0.7]],
+    cabinExp: 9, cabinTumble: 0.2, strakes: false, spoiler: 'none',
+  };
 }
 
 export const CAR_STYLES: Record<string, CarStyle> = {
@@ -211,6 +227,14 @@ export const CAR_STYLES: Record<string, CarStyle> = {
     around: 8,
     facet: 1,
   },
+  // The 90s pack (tools/build-cars.mjs): real sizes, measured by tools/blender/import90s.py.
+  asti: modelStyle('asti', 4.31, 2.03, 0.33, [0.18, 0.83]),
+  phoenix: modelStyle('phoenix', 5.06, 2.16, 0.35, [0.18, 0.8]),
+  gallo: modelStyle('gallo', 5.16, 2.18, 0.35, [0.18, 0.8]),
+  duke: modelStyle('duke', 5.56, 2.09, 0.37, [0.2, 0.8]),
+  duntov: modelStyle('duntov', 5.02, 2.01, 0.35, [0.18, 0.8]),
+  cheetah: modelStyle('cheetah', 5.03, 2.14, 0.35, [0.18, 0.8]),
+  nfr: modelStyle('nfr', 4.9, 2.18, 0.35, [0.18, 0.8]),
 };
 
 export interface CarOptions {
@@ -607,6 +631,39 @@ export function haloTexture(): THREE.CanvasTexture {
   return halo;
 }
 
+let beamTex: THREE.CanvasTexture | null = null;
+/**
+ * Headlight beams on the road, seen from above: two soft cones that start narrow at the bumper (bottom of the
+ * texture) and fan out and fade with distance (top). Drawn additively, so they only ever brighten the road.
+ */
+function beamTexture(): THREE.CanvasTexture {
+  if (beamTex) return beamTex;
+  const W = 128, H = 256;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d')!;
+  const img = g.createImageData(W, H);
+  for (let y = 0; y < H; y++) {
+    const d = 1 - y / (H - 1); // 0 at the bumper, 1 far ahead
+    const fade = Math.pow(Math.min(1, d / 0.08), 1.2) * Math.pow(1 - d, 1.7); // soft start, long fall-off
+    for (let x = 0; x < W; x++) {
+      const u = (x / (W - 1)) * 2 - 1; // -1..1 across
+      let a = 0;
+      for (const cx of [-0.42, 0.42]) {
+        const half = 0.1 + d * 0.5; // cone half-width grows with distance
+        const k = Math.max(0, 1 - Math.abs(u - cx * (1 - d * 0.55)) / half);
+        a = Math.max(a, k * k * (3 - 2 * k));
+      }
+      const i = (y * W + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+      img.data[i + 3] = Math.round(a * fade * 255);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  beamTex = new THREE.CanvasTexture(c);
+  return beamTex;
+}
+
 let plateTex: THREE.CanvasTexture | null = null;
 /** Generic number plate (made-up code), shared. */
 function plateTexture(): THREE.CanvasTexture {
@@ -813,6 +870,7 @@ export function setCarFogGlow(k: number): void {
 const HEIGHT_SCALE: Record<string, number> = { bus: 1, wedge: 1.14, muscle: 1.16, coupe: 1.16, hatch: 1.12, gt: 1.14, proto: 1.05, hyper: 1.07, razor: 1.12 };
 const WHEEL_GROW = 1; // v8 experiment (1.07) reverted with the v6 models
 export function raiseStyle(st: CarStyle): CarStyle {
+  if (st.model) return st;
   const k = HEIGHT_SCALE[st.name] ?? 1.15;
   const lift = (rows: Station[]): Station[] => rows.map(([t, top, bottom, hw]) => [t, top * k, bottom * (1 + (k - 1) * 1.3), hw]);
   // v8: bigger wheels that fill the arches (the Blender bodies are cut for the same size, see styles.json).
@@ -859,7 +917,7 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
   const L = style.length;
   const W = style.width;
   const hwm = W / 2;
-  const R = style.wheelRadius;
+  let R = style.wheelRadius;
 
   const tier = opts.tier ?? 'free';
   const paint = new THREE.MeshPhysicalMaterial({
@@ -885,7 +943,7 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
   car.name = `car-${style.name}`;
 
   const wheelZ = style.wheelT.map((t) => -L / 2 + t * L);
-  const wheelX = hwm - 0.13;
+  let wheelX = hwm - 0.13;
   const archR = R + 0.09;
   const feat = new Set(style.features ?? []);
   const wheelR = [R, R * (style.rearWheelScale ?? 1)];
@@ -934,6 +992,30 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
   const model = opts.procedural ? null : carModelFor(style.name, opts.lowDetail);
   // A complete model (Blender v2) has empties for its tail lights / exhausts and brings every detail itself.
   const full = !!model?.getObjectByName('tail_L');
+  // The model's own wheels (wheel_F / wheel_R, modelled on the right side, axle along X): measured here and used
+  // for all four pivots (the game spins and steers them).
+  const modelWheels: (THREE.Group | null)[] = [null, null];
+  if (model && full) {
+    model.updateMatrixWorld(true);
+    ['wheel_F', 'wheel_R'].forEach((n, wi) => {
+      const node = model.getObjectByName(n);
+      if (!node) return;
+      const box = new THREE.Box3().setFromObject(node);
+      const c = box.getCenter(new THREE.Vector3());
+      const g = new THREE.Group();
+      node.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        const mesh = new THREE.Mesh(m.geometry.clone().applyMatrix4(m.matrixWorld).translate(-c.x, -c.y, -c.z), m.material);
+        g.add(mesh);
+      });
+      modelWheels[wi] = g;
+      wheelZ[wi] = c.z;
+      wheelR[wi] = (box.max.y - box.min.y) / 2;
+      if (wi === 0) { wheelX = Math.abs(c.x); R = wheelR[0]; }
+      node.removeFromParent();
+    });
+  }
   if (model && !full) {
     const byName: Record<string, THREE.Material> = { paint, glass, trim, chrome, well: soot };
     const greenhouse = new THREE.Group();
@@ -974,9 +1056,16 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
     for (const side of [-1, 1]) {
       const pivot = new THREE.Group();
       pivot.position.set(side * wheelX, wheelR[wi], wz);
-      const wheel = buildWheel(wheelR[wi], accent, tyre, rimMat, style.rim ?? 'star5');
+      const mw = modelWheels[wi];
+      const wheel = mw ? mw.clone() : buildWheel(wheelR[wi], accent, tyre, rimMat, style.rim ?? 'star5');
       if (side < 0) wheel.rotation.y = Math.PI; // outer face outward
       pivot.add(wheel);
+      if (mw) {
+        // The model's wheel brings its own disc and caliper.
+        car.add(pivot);
+        wheels.push(pivot);
+        continue;
+      }
       // Brake caliper behind the spokes (rear-top of the disc): steers with the wheel but must not spin —
       // the game counter-rotates it (pivot.userData.caliper).
       const rr = wheelR[wi] * 0.7;
@@ -1430,13 +1519,35 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
       }
       return c;
     };
+    // Bought models: k_* materials stay as authored (interior, underbody, plates...); the paint keeps its panel
+    // normal map; the lamp atlas glows (head) or follows the brakes (tail).
+    let modelPaint: THREE.Material | null = null;
+    let modelHead: THREE.Material | null = null;
+    const pick = (x: THREE.Material): THREE.Material => {
+      const n = x.name.replace(/\.\d+$/, '');
+      if (n.startsWith('k_')) return x;
+      const src = x as THREE.MeshPhysicalMaterial;
+      if (n === 'paint' && (src.normalMap || src.clearcoatNormalMap)) {
+        if (!modelPaint) {
+          const pm = paint.clone();
+          pm.normalMap = src.normalMap ?? src.clearcoatNormalMap;
+          pm.clearcoatNormalMap = src.clearcoatNormalMap ?? null;
+          if (src.normalScale) pm.normalScale.copy(src.normalScale);
+          modelPaint = pm;
+        }
+        return modelPaint;
+      }
+      if (n === 'head' && src.map) return (modelHead ??= new THREE.MeshBasicMaterial({ map: src.map, color: new THREE.Color('#ffffff').multiplyScalar(2.4), fog: false }));
+      if (n === 'tail' && src.map && !tailMat.map) { tailMat.map = src.map; tailMat.needsUpdate = true; }
+      return byName[n] ?? paint;
+    };
     model.updateMatrixWorld(true);
     const empties: Record<string, THREE.Vector3> = {};
     model.traverse((o) => {
       const m = o as THREE.Mesh;
       if (/^(tail|exhaust|head)_[LR]/.test(o.name)) empties[o.name.slice(0, o.name.indexOf('_') + 2)] = new THREE.Vector3().setFromMatrixPosition(o.matrixWorld);
       if (!m.isMesh) return;
-      let mats = (Array.isArray(m.material) ? m.material : [m.material]).map((x) => byName[x.name.replace(/\.\d+$/, '')] ?? paint);
+      let mats = (Array.isArray(m.material) ? m.material : [m.material]).map(pick);
       // Baked ambient occlusion (vertex colours): every model mesh gets a colour attribute (white where none was baked)
       // and AO-aware copies of the lit materials (the procedural parts keep the plain ones).
       const geo = m.geometry;
@@ -1459,14 +1570,31 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
       exhausts.length = 0;
       exhausts.push(empties.exhaust_L, empties.exhaust_R);
     }
+    // Underglow between the axles only: the model cars stand taller, and a full-length bar showed under the sills.
+    if (modelWheels[0]) {
+      under.geometry.dispose();
+      under.geometry = new THREE.BoxGeometry(W * 0.5, 0.02, Math.abs(wheelZ[1] - wheelZ[0]) * 0.75);
+      under.position.set(0, 0.12, (wheelZ[0] + wheelZ[1]) / 2);
+    }
     // Imposing headlights: a bright soft glow on each lamp plus a faint horizontal streak (anamorphic flare).
     if (empties.head_L && empties.head_R) {
+      // Their light on the road ahead: two soft cones from the bumper.
+      const front = Math.min(empties.head_L.z, empties.head_R.z);
+      const beamLen = 16;
+      const beam = new THREE.Mesh(
+        new THREE.PlaneGeometry(W * 2.4, beamLen).rotateX(-Math.PI / 2),
+        new THREE.MeshBasicMaterial({ map: beamTexture(), color: '#fff3dc', transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }),
+      );
+      beam.name = 'beam';
+      beam.position.set(0, 0.03, front - beamLen / 2 + 0.2);
+      beam.renderOrder = 3;
+      car.add(beam);
       const glowMat = new THREE.SpriteMaterial({ map: haloTexture(), color: '#dfeeff', blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.85, fog: false });
       const streakMat = new THREE.SpriteMaterial({ map: haloTexture(), color: '#9fd4ff', blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.45, fog: false });
       for (const p of [empties.head_L, empties.head_R]) {
         const g = new THREE.Sprite(glowMat);
         g.position.copy(p);
-        g.scale.setScalar(0.55);
+        g.scale.setScalar(0.42);
         const st = new THREE.Sprite(streakMat);
         st.position.copy(p).add(new THREE.Vector3(0, 0, 0.02));
         st.scale.set(2.6, 0.07, 1);
@@ -1480,6 +1608,6 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
     if ((o as THREE.Mesh).isMesh) o.castShadow = false;
   });
   // Glow sprites live on layer 1: drawn by the main and mirror cameras, skipped by the road reflection.
-  car.traverse((o) => { if ((o as THREE.Sprite).isSprite) o.layers.set(1); });
-  return { group: car, wheels, style, setBrake, exhausts, tailLights };
+  car.traverse((o) => { if ((o as THREE.Sprite).isSprite || o.name === 'beam') o.layers.set(1); });
+  return { group: car, wheels, style: R === style.wheelRadius ? style : { ...style, wheelRadius: R }, setBrake, exhausts, tailLights };
 }

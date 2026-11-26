@@ -71,7 +71,6 @@ export interface CarSetup {
   style: string;
   paint: string;
   accent: string;
-  driftMode?: boolean;
   /** Physics overrides from the car's stats. */
   spec?: { topSpeed: number; accel: number; grip: number; brake?: number; wheelbase?: number; maxSteer?: number };
   name?: string;
@@ -124,6 +123,8 @@ export class World {
   beatHit = 0;
   private boostFx!: BoostFX;
   private readonly frame = makeFrame();
+  private readonly frameF = makeFrame();
+  private readonly frameR = makeFrame();
   private readonly basis = new THREE.Matrix4();
   private readonly back = new THREE.Vector3();
   private readonly up = new THREE.Vector3();
@@ -247,7 +248,7 @@ export class World {
       this.scene.add(car.group);
       const row = Math.floor(slot / 2);
       const x = (slot % 2 === 0 ? -1 : 1) * this.track.width * 0.22;
-      const spec: CarSpec = { ...DEFAULT_SPEC, ...(setup.spec ?? {}), length: car.style.length, halfWidth: car.style.width / 2, driftMode: i === 0 && playerCar.driftMode, brakeSlide: i === 0 };
+      const spec: CarSpec = { ...DEFAULT_SPEC, ...(setup.spec ?? {}), length: car.style.length, halfWidth: car.style.width / 2, brakeSlide: i === 0 };
       this.cars.push({
         car,
         name: netName ?? (i === 0 ? 'YOU' : (setup as { name?: string }).name ?? `CPU ${i}`),
@@ -479,8 +480,18 @@ export class World {
       g.position.copy(this.frame.position).addScaledVector(this.frame.right, x);
       // Body forward = track forward rotated by psi toward the right.
       this.fwd.copy(this.frame.forward).multiplyScalar(Math.cos(psi)).addScaledVector(this.frame.right, Math.sin(psi));
-      // On hills the body sits on the sloped road: up = road normal, forward tipped along the slope.
-      const slope = this.track.slopeAt(s);
+      // On hills the body rests on its axles: the pitch follows the road between the front and rear wheels and
+      // the car is lifted where the road dips under it (a rigid 5 m car on the centre slope alone cut into the
+      // road in hollows and over crests).
+      let slope = this.track.slopeAt(s);
+      if (this.track.hilly) {
+        const a = c.car.style.length * 0.3;
+        this.track.frameAt(s + a, this.frameF);
+        this.track.frameAt(s - a, this.frameR);
+        const yF = this.frameF.position.y + this.frameF.right.y * x, yR = this.frameR.position.y + this.frameR.right.y * x;
+        slope = (yF - yR) / (2 * a);
+        g.position.y = Math.max(g.position.y, (yF + yR) / 2);
+      }
       this.up.set(-slope * this.frame.forward.x, 1, -slope * this.frame.forward.z).normalize();
       this.fwd.addScaledVector(this.up, -this.fwd.dot(this.up)).normalize();
       this.side.crossVectors(this.fwd, this.up).normalize();

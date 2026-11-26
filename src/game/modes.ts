@@ -29,9 +29,9 @@ export interface GameMode {
 }
 
 const TRAFFIC_LOOKS: { style: string; paint: string }[] = [
-  { style: 'hatch', paint: '#c8c2b0' }, { style: 'gt', paint: '#5a6470' }, { style: 'muscle', paint: '#7a2a22' },
-  { style: 'coupe', paint: '#2f4a6a' }, { style: 'hatch', paint: '#e0d070' }, { style: 'gt', paint: '#1e1e24' },
-  { style: 'muscle', paint: '#3d5a3a' }, { style: 'coupe', paint: '#9a9aa4' },
+  { style: 'asti', paint: '#c8c2b0' }, { style: 'gallo', paint: '#5a6470' }, { style: 'duke', paint: '#7a2a22' },
+  { style: 'phoenix', paint: '#2f4a6a' }, { style: 'asti', paint: '#e0d070' }, { style: 'gallo', paint: '#1e1e24' },
+  { style: 'duke', paint: '#3d5a3a' }, { style: 'phoenix', paint: '#9a9aa4' },
 ];
 
 /** Civilian traffic around the player, recycled from behind to far ahead. */

@@ -14,3 +14,6 @@ server/.env
 cloud/.dev.vars
 cloud/.wrangler
 cloud/.cf-token
+
+# Bought source assets (licensed, large): never commit
+assets-src/

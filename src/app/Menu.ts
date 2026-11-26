@@ -579,12 +579,6 @@ export class Menu {
             </div>
             <div class="status" data-amb-now>${this.ambienceText()}</div>
           </div></div>
-        <div class="row"><span class="label">Driving</span>
-          <button class="chip ${s.driveMode === 'grip' ? 'on' : ''}" data-drive="grip">Grip</button>
-          <button class="chip ${s.driveMode === 'drift' ? 'on' : ''}" data-drive="drift">Drift</button>
-          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${s.driveMode === 'drift'
-            ? 'Steer hard + tap brake / SPACE at speed to slide; keep steering to hold the drift.'
-            : 'Planted and precise. SPACE (handbrake) still kicks the tail out.'}</span></div>
         <div class="row"><span class="label">Lighting</span>
           <input type="range" min="0.5" max="1" step="0.05" value="${s.lighting ?? 1}" data-lighting></div>
         <div class="row"><span class="label">Beat lights</span>
@@ -656,10 +650,6 @@ export class Menu {
     el.querySelectorAll<HTMLElement>('[data-amb]').forEach((c) => c.addEventListener('click', () => {
       s.ambience = c.dataset.amb!;
       this.commit(); this.h.sound('select'); this.h.settingsChanged(); this.renderOptions();
-    }));
-    el.querySelectorAll<HTMLElement>('[data-drive]').forEach((c) => c.addEventListener('click', () => {
-      s.driveMode = c.dataset.drive as Settings['driveMode'];
-      this.commit(); this.h.sound('select'); this.renderOptions();
     }));
     el.querySelectorAll<HTMLElement>('[data-vhs]').forEach((c) => c.addEventListener('click', () => {
       s.vhs = c.dataset.vhs === '1';
@@ -736,7 +726,8 @@ export class Menu {
 
   showLoading(): void {
     const el = this.screens.get('loading')!;
-    el.innerHTML = '<div class="title" style="margin-top:40vh">LOADING</div>';
+    el.innerHTML = `<div class="title" style="margin-top:8vh">LOADING</div>
+      <div class="loading-controls"><div class="controls-list">${controlsHtml(TOUCH ? 'touch' : 'keys')}</div></div>`;
     this.show('loading', false);
   }
 

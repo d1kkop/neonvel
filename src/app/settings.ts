@@ -31,7 +31,6 @@ export interface Settings {
   /** 'auto' = level track, 'shuffle', or a fixed track id. */
   music: string;
   /** 'grip' = planted, 'drift' = held slides with brake/handbrake + steer. */
-  driveMode: 'grip' | 'drift';
   opponents: number;
   /** Quick Race game mode. */
   mode: 'race' | 'highway';
@@ -61,7 +60,7 @@ const DEFAULTS: Settings = {
   quality: 'high',
   qualityAuto: true,
   volume: { master: 0.8, music: 0.8, sfx: 0.45, ambience: 0.12 },
-  carId: 'vortex',
+  carId: 'velvet',
   carPaint: {},
   ownedCars: [],
   levelId: 'neon-skyway',
@@ -72,7 +71,6 @@ const DEFAULTS: Settings = {
   bestLaps: {},
   ambience: 'auto',
   music: 'auto',
-  driveMode: 'grip',
   opponents: 3,
   mode: 'race',
   lighting: 1,
@@ -83,7 +81,7 @@ const DEFAULTS: Settings = {
   authToken: '',
   rating: START_RATING,
   games: 0,
-  version: 7,
+  version: 8,
 };
 
 export function loadSettings(): Settings {
@@ -129,6 +127,14 @@ export function loadSettings(): Settings {
       if (s.version < 7) {
         s.bestLaps = {};
         s.version = 7;
+      }
+      // v8: one handling model (grip/drift choice gone): lap bests reset.
+      if (s.version < 8) {
+        s.bestLaps = {};
+        delete (s as { driveMode?: string }).driveMode;
+        // The bus and the Phantom left the line-up (new car models).
+        if (s.carId === 'bus' || s.carId === 'phantom') s.carId = 'velvet';
+        s.version = 8;
       }
       return s;
     }
