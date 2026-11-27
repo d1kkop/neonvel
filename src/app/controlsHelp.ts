@@ -37,9 +37,7 @@ function face(kind: PadKind, b: Btn): string {
 
 const pill = (t: string) => `<span class="pad-pill">${t}</span>`;
 const key = (t: string) => `<span class="key-cap">${t}</span>`;
-const row = (action: string, inputs: string) => `<div class="ctl-row"><span class="ctl-act">${action}</span><span class="ctl-in">${inputs}</span></div>`;
-
-const DRIFT_TIP = 'steer hard at speed + tap brake or let go of the gas; keep steering to hold it';
+const row = (action: string, inputs: string, hot = false) => `<div class="ctl-row${hot ? ' hot' : ''}"><span class="ctl-act">${action}</span><span class="ctl-in">${inputs}</span></div>`;
 
 /** `only`: 'touch' = phone / tablet without a pad, just the touch controls; 'keys' = no touch section. */
 export function controlsHtml(only?: 'touch' | 'keys'): string {
@@ -48,16 +46,16 @@ export function controlsHtml(only?: 'touch' | 'keys'): string {
   const touch = `<div class="ctl-head"${touchOnly ? '' : ' style="margin-top:12px"'}>Touch</div>
       ${row('Steer', '◀ ▶ buttons bottom-left (or the stick / tilting the phone: Options › Touch)')}
       ${row('Gas / brake', 'gas is automatic (Options › Touch › Auto gas); hold BRAKE bottom-right to slow down')}
-      ${row('Drift / boost', 'hold DRIFT while steering hard; BOOST button')}`;
+      ${row('Drift', 'hold DRIFT while steering', true)}
+      ${row('Boost', 'BOOST button', true)}`;
   if (!kind && touchOnly) return touch;
   if (!kind) {
     return `<div class="ctl-head">Keyboard <span class="ctl-note">(plug in a controller and press a button to see its layout)</span></div>
       ${row('Accelerate', `${key('↑')} ${key('W')}`)}
       ${row('Brake / reverse', `${key('↓')} ${key('S')}`)}
       ${row('Steer', `${key('←')} ${key('→')} &nbsp;${key('A')} ${key('D')}`)}
-      ${row('Drift', DRIFT_TIP)}
-      ${row('Handbrake', key('SPACE'))}
-      ${row('Boost', key('SHIFT'))}
+      ${row('Drift', `${key('SPACE')} + steer`, true)}
+      ${row('Boost', key('SHIFT'), true)}
       ${row('Pause', key('ESC'))}
       ${row('Camera', key('C'))}
       ${row('Mute / next song', `${key('M')} ${key('N')}`)}
@@ -71,8 +69,7 @@ export function controlsHtml(only?: 'touch' | 'keys'): string {
     ${row('Accelerate', `${R2} ${face(kind, 'south')}`)}
     ${row('Brake / reverse', `${L2} ${face(kind, 'east')}`)}
     ${row('Steer', `${pill('Left stick')} ${pill('D-pad')}`)}
-    ${row('Drift', DRIFT_TIP)}
-    ${row('Handbrake', `${face(kind, 'west')} ${R1}`)}
-    ${row('Boost', `${face(kind, 'north')} ${L1}`)}
+    ${row('Drift', `${face(kind, 'west')} ${R1} + steer`, true)}
+    ${row('Boost', `${face(kind, 'north')} ${L1}`, true)}
     ${row('Pause', pill(ps ? 'OPTIONS' : 'MENU'))}`;
 }

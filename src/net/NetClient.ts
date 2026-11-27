@@ -1,4 +1,4 @@
-import type { LeaderRow } from '../app/Menu';
+import type { LeaderRow, LobbyInfo } from '../app/Menu';
 
 export interface NetPlayer {
   id: string;
@@ -25,7 +25,8 @@ export interface NetCarState {
 /** Messages exchanged with the matchmaking server (see /server). */
 export type ServerMsg =
   | { t: 'welcome'; id: string; name: string; rating: number; games: number; owned?: string[] }
-  | { t: 'queued'; size: number; range: number; found?: number; max?: number; waited?: number; wait?: number }
+  | { t: 'lobbies'; lobbies: LobbyInfo[]; online: number }
+  | { t: 'lobby'; lobby: LobbyInfo | null }
   | { t: 'match'; matchId: string; levelId: string; weather: string; laps: number; you: string; players: NetPlayer[]; ticket?: string }
   | { t: 'joined'; matchId: string }
   | { t: 'go'; matchId: string; countdown: number }
@@ -165,7 +166,7 @@ export class NetClient {
     this.ws = null;
   }
 
-  static toRows(rows: { name: string; rating: number; games: number }[], me: string): LeaderRow[] {
-    return rows.map((r, i) => ({ rank: i + 1, name: r.name, rating: r.rating, games: r.games, isMe: r.name === me }));
+  static toRows(rows: { name: string; rating: number; games: number; rank?: number }[], me: string): LeaderRow[] {
+    return rows.map((r, i) => ({ rank: r.rank ?? i + 1, name: r.name, rating: r.rating, games: r.games, isMe: r.name === me }));
   }
 }

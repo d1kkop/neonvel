@@ -6,6 +6,7 @@ import { createCoral, createKelp, createWaterSurface, Placement } from '../world
 import { fbm2, Terrain } from '../world/terrain/Terrain';
 import { createLampBeams } from '../world/weather/Beams';
 import { CirclingSharks, DolphinPod, FishSchools } from '../world/props/SeaLife';
+import { createWreck, OceanCreatures } from '../world/props/SeaCreatures';
 import type { LevelDef } from './types';
 
 const SURFACE = 150;
@@ -110,7 +111,7 @@ export const deepBlue: LevelDef = {
       }
       if (!ok) continue;
       c.y = track.height + rng.range(-8, 14);
-      paths.push({ centre: c, radius, speed: rng.range(7, 11), phase: rng.range(0, 6.28), scale });
+      paths.push({ centre: c, radius, speed: rng.range(7, 11), phase: rng.range(0, 6.28), scale: paths.length === 3 ? scale * 0.8 : scale, orca: paths.length === 3 });
     }
     const sharks = new CirclingSharks(paths);
     scene.add(sharks.group);
@@ -144,6 +145,20 @@ export const deepBlue: LevelDef = {
     };
     sharks.preyNear = (p, r) => fish.preyNear(p, r);
 
+    const critters = new OceanCreatures(track, () => rng.next(), ctx.quality);
+    scene.add(critters.group);
+    (window as unknown as { __ocean?: unknown }).__ocean = critters;
+
+    // A broken liner on the seabed, 60-80 m off the road edge (between the canopy and the tunnel).
+    const wreck = createWreck();
+    track.frameAt(1560, frame);
+    const wx = frame.position.x - frame.right.x * 125, wz = frame.position.z - frame.right.z * 125;
+    wreck.position.set(wx, seabed.heightAt(wx, wz) + 4, wz);
+    wreck.rotation.y = Math.atan2(-frame.forward.x, -frame.forward.z) + 0.25;
+    scene.add(wreck);
+    const camAt = (d: number, up: number) => { track.frameAt(d, frame); return frame.position.clone().add(new THREE.Vector3(0, up, 0)); };
+    (window as unknown as { __oceanCam?: unknown }).__oceanCam = { pos: camAt(1470, 3.2), look: camAt(1535, 8).addScaledVector(frame.right, -40) };
+
     const viewer = new THREE.Vector3();
     ctx.onUpdate((time, dt) => {
       const pl = ctx.player();
@@ -152,6 +167,7 @@ export const deepBlue: LevelDef = {
       pod.update(time, dt, pl);
       sharks.update(time, dt, viewer, frame.forward, pod.hunting);
       fish.update(time, dt, pl);
+      critters.update(time, dt, viewer);
     });
     return {};
   },

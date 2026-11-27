@@ -3,13 +3,15 @@ import { makeFrame } from '../track/Track';
 import { Rng } from '../util/random';
 import { designs } from '../world/billboardArt';
 import { CoastTerrain, createOcean } from '../world/coast/Coast';
-import { createHotels, createLifeguardTowers, createSeagulls, createUmbrellas, Placement } from '../world/props/BeachProps';
+import { createHotelVariants, HotelSpec, HotelVariant } from '../world/props/BeachBuildings';
+import { createLifeguardTowers, createSeagulls, createUmbrellas, Placement } from '../world/props/BeachProps';
 import { createPalms, PalmPlacement, palmWind } from '../world/props/Palms';
 import { createBeachBars, createPartyLights, LightString } from '../world/props/BeachParty';
 import { createDrinkTables, createLoungers, Dancers, type Lounger, VolleyballCourt } from '../world/props/BeachLife';
 import type { LevelDef } from './types';
 
-const PASTELS = ['#ffb3c7', '#9fe3e0', '#ffe3a3', '#c7b3ff', '#ffc9a3', '#b3ffd1', '#f7f3ea'].map((c) => new THREE.Color(c));
+const NEONS = ['#ff2bd6', '#00e5ff', '#ff8a3c', '#7dff6a', '#ffe14a', '#b36bff'].map((c) => new THREE.Color(c));
+const PASTELS = ['#ffb3c7', '#9fe3e0', '#ffe3a3', '#c7b3ff', '#ffc9a3', '#b3ffd1', '#f7f3ea', '#ff9fb8', '#fff2a8'].map((c) => new THREE.Color(c));
 
 export const palmCoast: LevelDef = {
   id: 'palm-coast',
@@ -77,7 +79,7 @@ export const palmCoast: LevelDef = {
     /** For each umbrella: the direction toward the sea (unit x, z). */
     const seaward = new Map<Placement, [number, number]>();
     const towers: Placement[] = [];
-    const hotels: { x: number; y: number; z: number; w: number; h: number; d: number; yaw: number; color: THREE.Color }[] = [];
+    const hotels: HotelSpec[] = [];
 
     // Palm avenue along both sides of the road + umbrellas and towers on the beach side.
     for (let d = 0; d < track.length; d += 16 + rng.range(0, 10)) {
@@ -123,15 +125,24 @@ export const palmCoast: LevelDef = {
       const z = rng.range(-200, 700);
       if (!terrain.inside(x, z)) continue;
       const dist = terrain.distance(x, z);
-      const w = rng.range(18, 50), d = rng.range(14, 34);
+      // Pick a variant that differs from the neighbours within ~90 m; the shape decides the size.
+      const near = new Set(hotels.filter((o) => Math.hypot(o.x - x, o.z - z) < 90).map((o) => o.variant));
+      const pool: HotelVariant[] = ['deco', 'deco', 'stepped', 'stepped', 'curved', 'condo', 'condo', 'house', 'house', 'motel', 'motel', 'lighthouse'];
+      let variant: HotelVariant = rng.pick(pool);
+      for (let t = 0; t < 6 && (near.has(variant) || (variant === 'lighthouse' && hotels.filter((o) => o.variant === 'lighthouse').length >= 4)); t++) variant = rng.pick(pool);
+      let w = rng.range(18, 50), d = rng.range(14, 34), h = rng.range(10, 36);
+      if (variant === 'condo') { w = rng.range(16, 28); d = rng.range(16, 26); h = rng.range(50, 110); }
+      else if (variant === 'lighthouse') { w = d = rng.range(9, 13); h = rng.range(40, 65); }
+      else if (variant === 'house') { w = rng.range(9, 16); d = rng.range(9, 14); h = rng.range(6, 10); }
+      else if (variant === 'motel') { w = rng.range(26, 44); d = rng.range(18, 26); h = rng.range(7, 11); }
+      else if (variant === 'curved') { h = rng.range(24, 48); }
+      else if (variant === 'stepped') { h = rng.range(26, 56); }
+      else h = rng.range(16, 44);
       if (dist < hw + 30 + Math.hypot(w, d) / 2) continue;
-      const tall = rng.chance(0.15);
-      const h = tall ? rng.range(45, 110) : rng.range(10, 36);
-      // Face the nearest road point.
-      const yaw = Math.round(rng.range(-1, 1)) * 0.3;
+      const yaw = variant === 'lighthouse' ? rng.range(0, 6.28) : Math.round(rng.range(-1, 1)) * 0.3 + rng.range(-0.15, 0.15);
       const rad = Math.hypot(w, d) / 2;
       if (hotels.some((o) => Math.hypot(o.x - x, o.z - z) < rad + Math.hypot(o.w, o.d) / 2 + 3)) continue;
-      hotels.push({ x, y: terrain.heightAt(x, z) - 1, z, w, h, d, yaw, color: rng.pick(PASTELS) });
+      hotels.push({ x, y: terrain.heightAt(x, z) - 1, z, w, h, d, yaw, color: rng.pick(PASTELS), trim: rng.pick(NEONS), variant });
     }
     for (let i = 0; i < 700; i++) {
       const x = rng.range(-600, 1300);
@@ -343,7 +354,7 @@ export const palmCoast: LevelDef = {
     if (towers.length) scene.add(createLifeguardTowers(towers));
     if (bars.length) scene.add(createBeachBars(bars));
     if (poles.length || torches.length) scene.add(createPartyLights(poles, strings, torches));
-    if (hotels.length) scene.add(createHotels(hotels));
+    if (hotels.length) scene.add(createHotelVariants(hotels));
     const gulls: THREE.Vector3[] = [];
     for (let i = 0; i < 36; i++) {
       track.frameAt(rng.range(0, track.length), frame);

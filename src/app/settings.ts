@@ -8,6 +8,8 @@ export interface Settings {
   quality: Quality;
   /** Pick the graphics quality from the detected GPU (on until the player picks one by hand). */
   qualityAuto?: boolean;
+  /** Forced render resolution as a fraction of the screen's real pixels (1 = native); unset = automatic (dynamic). */
+  resScale?: number;
   /** Phone / tablet controls: on-screen ◀ ▶ buttons, steering stick, or tilt; autoGas = always on the throttle unless braking. */
   touchControls?: 'buttons' | 'stick' | 'tilt';
   autoGas?: boolean;
@@ -81,7 +83,7 @@ const DEFAULTS: Settings = {
   authToken: '',
   rating: START_RATING,
   games: 0,
-  version: 8,
+  version: 9,
 };
 
 export function loadSettings(): Settings {
@@ -135,6 +137,11 @@ export function loadSettings(): Settings {
         // The bus and the Phantom left the line-up (new car models).
         if (s.carId === 'bus' || s.carId === 'phantom') s.carId = 'velvet';
         s.version = 8;
+      }
+      if (s.version < 9) {
+        // The Classic 55 is yellow by default now: forget an older saved colour for it.
+        if (s.carPaint) delete s.carPaint.classic;
+        s.version = 9;
       }
       return s;
     }

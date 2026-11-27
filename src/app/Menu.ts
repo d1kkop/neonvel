@@ -20,14 +20,20 @@ import { listTracks, TrackInfo } from '../audio/SynthwaveMusic';
 import { WEATHER_LABELS, WeatherName } from '../world/weather/Weather';
 import { Settings, saveSettings } from './settings';
 
-export type ScreenName = 'main' | 'quick' | 'garage' | 'netplay' | 'leaderboard' | 'options' | 'pause' | 'results' | 'loading' | 'none';
+export type ScreenName = 'main' | 'quick' | 'garage' | 'netplay' | 'lobby' | 'ranking' | 'leaderboard' | 'options' | 'pause' | 'results' | 'loading' | 'none';
 
 export interface MenuHandlers {
   startRace(): void;
-  findMatch(): void;
-  /** The wait time was changed (while searching it is sent at once). */
-  matchWaitChanged?(): void;
-  cancelMatch(): void;
+  /** Netplay screen opened: connect and sign in. */
+  netOpen(): void;
+  netHost(o: { level: string; laps: number; weather: string; max: number }): void;
+  netJoin(id: string): void;
+  /** The player picked another car or paint (settings are already updated). */
+  netCarChanged(): void;
+  netReady(ready: boolean): void;
+  netSet(o: { level?: string; laps?: number; weather?: string }): void;
+  netStart(): void;
+  netLeave(): void;
   refreshLeaderboard(): void;
   /** A track's fastest-lap board (null = server offline). */
   lapBoard(level: string): Promise<LapBoard | null>;
@@ -52,6 +58,20 @@ export interface MenuHandlers {
   /** Buy a store item (car id or `level:<id>`). */
   buyItem(item: string): void;
   garageHear(carId: string): void;
+}
+
+/** A lobby as the server describes it (members only inside the lobby itself). */
+export interface LobbyInfo {
+  id: string;
+  host: string;
+  hostId: string;
+  level: string;
+  laps: number;
+  weather: string;
+  max: number;
+  n: number;
+  status: 'waiting' | 'racing';
+  members?: { id: string; name: string; car: { id: string; paint: string }; ready: boolean }[];
 }
 
 export interface ResultRow {
@@ -96,7 +116,7 @@ export class Menu {
     this.root = document.createElement('div');
     this.root.id = 'ui';
     document.body.appendChild(this.root);
-    for (const name of ['main', 'quick', 'garage', 'netplay', 'leaderboard', 'options', 'pause', 'results', 'loading'] as ScreenName[]) {
+    for (const name of ['main', 'quick', 'garage', 'netplay', 'lobby', 'ranking', 'leaderboard', 'options', 'pause', 'results', 'loading'] as ScreenName[]) {
       const el = document.createElement('div');
       el.className = 'screen' + (name === 'main' ? ' locked' : ' dim');
       el.dataset.screen = name;
@@ -127,7 +147,10 @@ export class Menu {
   }
 
   show(name: ScreenName, pushHistory = true): void {
-    if (this.current === 'garage' && name !== 'garage') this.closeGarage();
+    if (this.current === 'garage' && name !== 'garage') { this.closeGarage(); this.garageLobby = false; }
+    if (this.current === 'quick' && name !== 'quick') this.quickMode = 'race';
+    // Back from a race into a lobby: show the lobby, not the list.
+    if (name === 'netplay' && this.lobby) name = 'lobby';
     if (pushHistory && this.current !== 'none' && this.current !== name) this.history.push(this.current);
     this.current = name;
     for (const [n, el] of this.screens) el.classList.toggle('active', n === name);
@@ -135,6 +158,8 @@ export class Menu {
     if (name === 'quick') this.renderQuick();
     if (name === 'garage') { this.renderGarage(); this.h.garageOpen(); }
     if (name === 'netplay') this.renderNetplay();
+    if (name === 'lobby') this.renderLobby();
+    if (name === 'ranking') this.renderRanking();
     if (name === 'leaderboard') this.renderLeaderboard();
     if (name === 'options') this.renderOptions();
     const first = this.screens.get(name)?.querySelector<HTMLElement>('.btn');
@@ -250,32 +275,34 @@ export class Menu {
         ${id ? shots(id) : ''}<h3>${esc(l.name)}</h3>${id ? (levelOwned(id) ? '' : `<span class="badge price">🔒 ${formatPrice(levelPrice(id))}</span>`) : '<span class="badge">COMING SOON</span>'}
       </div>`;
     const laps = s.lapsByLevel?.[level.id] ?? defaultLaps(level.id);
+    const net = this.quickMode !== 'race';
+    const wlist: string[] = net ? level.weathers.filter((w) => w === 'clear' || w === 'rain' || w === 'storm') : level.weathers.filter((w) => w !== 'fog');
     el.innerHTML = `
-      <div class="title">QUICK RACE</div>
+      <div class="title">${this.quickMode === 'host' ? 'HOST LOBBY' : this.quickMode === 'edit' ? 'CHANGE TRACK' : 'QUICK RACE'}</div>
       <div class="panel">
         <div class="cards">${LEVELS.map((l) => card(l, l.id)).join('')}${UPCOMING.map((u) => card(u)).join('')}</div>
         <div class="row" style="margin-top:18px"><span class="label">Weather</span>
-          ${level.weathers.filter((w) => w !== 'fog').map((w) => `<button class="chip ${w === weather ? 'on' : ''}" data-weather="${w}">${weatherLabel(level, w)}</button>`).join('')}</div>
+          ${wlist.map((w) => `<button class="chip ${w === weather ? 'on' : ''}" data-weather="${w}">${weatherLabel(level, w as WeatherName)}</button>`).join('')}</div>
         ${canFog ? `<div class="row"><span class="label">Fog</span>
           <button class="chip ${fogOn ? '' : 'on'}" data-fog="0">Off</button>
           <button class="chip ${fogOn ? 'on' : ''}" data-fog="1">On</button>
           <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">Mist lying on the track — works with any weather.</span></div>` : ''}
-        <div class="row"><span class="label">Mode</span>
+        ${net ? '' : `<div class="row"><span class="label">Mode</span>
           ${([['race', 'Race'], ['highway', 'Highway Rush']] as const).map(([m, label]) => `<button class="chip ${m === (s.mode ?? 'race') ? 'on' : ''}" data-mode="${m}">${label}</button>`).join('')}
-          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${(s.mode ?? 'race') === 'race' ? 'Classic race against the AI.' : 'Open road with traffic: near misses score and fill your boost, checkpoints add time — beat the clock.'}</span></div>
-        ${(s.mode ?? 'race') === 'race' ? '' : '<div style="display:none">'}
+          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${(s.mode ?? 'race') === 'race' ? 'Classic race against the AI.' : 'Open road with traffic: near misses score and fill your boost, checkpoints add time — beat the clock.'}</span></div>`}
+        ${net || (s.mode ?? 'race') === 'race' ? '' : '<div style="display:none">'}
         <div class="row"><span class="label">Laps</span>
           ${[1, 2, 3, 5].map((n) => `<button class="chip ${n === laps ? 'on' : ''}" data-laps="${n}">${n}</button>`).join('')}</div>
-        <div class="row"><span class="label">Opponents</span>
-          ${[1, 3, 5, 7, 10].map((n) => `<button class="chip ${n === s.opponents ? 'on' : ''}" data-opp="${n}">${n}</button>`).join('')}</div>
-        ${(s.mode ?? 'race') === 'race' ? '' : '</div>'}
-        <div class="row"><span class="label">Car</span>
+        ${net ? '' : `<div class="row"><span class="label">Opponents</span>
+          ${[1, 3, 5, 7, 10].map((n) => `<button class="chip ${n === s.opponents ? 'on' : ''}" data-opp="${n}">${n}</button>`).join('')}</div>`}
+        ${net || (s.mode ?? 'race') === 'race' ? '' : '</div>'}
+        ${net ? '' : `<div class="row"><span class="label">Car</span>
           <span style="font-family:Arial,sans-serif">${esc(carById(s.carId).name)}</span>
-          <button class="chip" data-act="garage">Change in Garage</button></div>
+          <button class="chip" data-act="garage">Change in Garage</button></div>`}
         <div class="row" style="justify-content:space-between;margin-top:18px">
           <button class="btn small" data-act="back">Back</button>
           ${levelOwned(level.id)
-            ? '<button class="btn primary" data-act="start">Start Race ▸</button>'
+            ? `<button class="btn primary" data-act="start">${this.quickMode === 'host' ? 'Create Lobby ▸' : this.quickMode === 'edit' ? 'Confirm ▸' : 'Start Race ▸'}</button>`
             : `<button class="btn primary" data-act="buylevel">Unlock ${esc(level.name)} · ${formatPrice(levelPrice(level.id))}</button>`}
         </div>
       </div>`;
@@ -308,7 +335,13 @@ export class Menu {
     }));
     el.querySelector('[data-act=garage]')?.addEventListener('click', () => { this.h.sound('select'); this.show('garage'); });
     el.querySelector('[data-act=back]')!.addEventListener('click', () => this.back());
-    el.querySelector('[data-act=start]')?.addEventListener('click', () => this.h.startRace());
+    el.querySelector('[data-act=start]')?.addEventListener('click', () => {
+      if (!net) { this.h.startRace(); return; }
+      this.h.sound('select');
+      const w = wlist.includes(weather) ? weather : 'clear';
+      if (this.quickMode === 'host') this.h.netHost({ level: level.id, laps, weather: w, max: 8 });
+      else { this.h.netSet({ level: level.id, laps, weather: w }); this.back(); }
+    });
     el.querySelector('[data-act=buylevel]')?.addEventListener('click', () => { this.h.sound('select'); this.h.buyItem(levelItem(level.id)); });
     this.playShots(el);
   }
@@ -342,6 +375,8 @@ export class Menu {
 
   private preview: GaragePreview | null = null;
   private garageView = '';
+  /** Colours tried on locked cars in the garage (not saved). */
+  private readonly tryPaint: Record<string, string> = {};
   private storeMode: StoreMode = 'offline';
 
   private owns(id: string): boolean {
@@ -356,10 +391,16 @@ export class Menu {
     const view = carById(this.garageView);
     const owned = this.owns(view.id);
     const bar = (v: number) => `<span class="stat"><i style="width:${v * 10}%"></i></span>`;
-    const paint = s.carPaint[view.id] ?? view.paint;
-    const modeNote = this.storeMode === 'test' ? 'Store: TEST MODE — purchases are free test unlocks.'
-      : this.storeMode === 'stripe' ? 'Secure payment via Stripe Checkout.'
-      : this.storeMode === 'off' ? 'Store disabled on this server.' : 'Store offline — start the server to buy cars.';
+    // Locked cars can be tried in every colour (preview only, not saved).
+    const paint = (owned ? s.carPaint[view.id] : this.tryPaint[view.id]) ?? view.paint;
+    // No store blurbs (the player found them confusing); only say it when buying is impossible right now.
+    const modeNote = this.storeMode === 'off' || !this.storeMode ? 'Buying is not available right now.' : '';
+    // Re-rendering replaces every element: remember which one had keyboard focus and put it back afterwards
+    // (else the next arrow key starts again from the top of the screen).
+    const fa = document.activeElement as HTMLElement | null;
+    const refocus = fa && el.contains(fa)
+      ? (fa.dataset.car ? `[data-car="${fa.dataset.car}"]` : fa.dataset.paint ? `[data-paint="${fa.dataset.paint}"]` : fa.dataset.act ? `[data-act="${fa.dataset.act}"]` : '')
+      : '';
     el.innerHTML = `
       <div class="title">GARAGE</div>
       <div class="panel garage">
@@ -381,7 +422,7 @@ export class Menu {
             <div><span>ACCEL</span>${bar(view.stats.accel)}</div>
             <div><span>GRIP</span>${bar(view.stats.grip)}</div>
           </div>
-          ${owned ? `<div class="row">${PAINTS.map((p) => `<span tabindex="0" class="swatch ${p === paint ? 'on' : ''}" data-paint="${p}" style="background:${p}"></span>`).join('')}</div>` : ''}
+          <div class="row">${PAINTS.map((p) => `<span tabindex="0" class="swatch ${p === paint ? 'on' : ''}" data-paint="${p}" style="background:${p}"></span>`).join('')}</div>
           <div class="row" style="justify-content:space-between;margin-top:12px">
             <button class="btn small" data-act="back">Back</button>
             ${owned
@@ -407,15 +448,20 @@ export class Menu {
       this.renderGarage();
     }));
     el.querySelectorAll<HTMLElement>('[data-paint]').forEach((c) => c.addEventListener('click', () => {
-      s.carPaint[view.id] = c.dataset.paint!;
-      this.commit(); this.h.sound('select'); this.renderGarage();
+      if (owned) {
+        s.carPaint[view.id] = c.dataset.paint!; this.commit();
+        if (this.garageLobby && view.id === s.carId) this.h.netCarChanged();
+      } else this.tryPaint[view.id] = c.dataset.paint!;
+      this.h.sound('select'); this.renderGarage();
     }));
     el.querySelector('[data-act=select]')?.addEventListener('click', () => {
-      s.carId = view.id; this.commit(); this.h.sound('select'); this.renderGarage();
+      s.carId = view.id; this.commit(); this.h.sound('select');
+      if (this.garageLobby) { this.h.netCarChanged(); this.back(); } else this.renderGarage();
     });
     el.querySelector('[data-act=hear]')?.addEventListener('click', () => this.h.garageHear(view.id));
     el.querySelector('[data-act=buy]')?.addEventListener('click', () => { this.h.sound('select'); this.h.garageBuy(view.id); });
     el.querySelector('[data-act=back]')!.addEventListener('click', () => this.back());
+    if (refocus) (el.querySelector<HTMLElement>(refocus) ?? el.querySelector<HTMLElement>(`[data-car="${view.id}"]`))?.focus({ preventScroll: true });
   }
 
   setGarageStatus(text: string): void {
@@ -429,47 +475,184 @@ export class Menu {
     this.garageView = '';
   }
 
+  /** Netplay: the lobby list only. */
   private renderNetplay(): void {
     const el = this.screens.get('netplay')!;
-    const s = this.s;
     el.innerHTML = `
       <div class="title">NETPLAY</div>
       <div class="panel" style="max-width:720px">
         <div data-account></div>
+        <div class="status" data-status>Connecting to server…</div>
+        <div data-browse></div>
+        <div class="row" style="justify-content:space-between;margin-top:16px">
+          <button class="btn small" data-act="back">Back</button>
+          <button class="btn primary" data-act="host">Host Lobby ▸</button>
+        </div>
+        <div class="rating" style="margin-top:18px"><div><div class="hud-small">RATING</div><div class="big" data-rating>${this.s.rating}</div></div>
+          <div><div class="hud-small">RANK</div><div class="hud-big" data-rank>${rankName(this.s.rating)}</div></div>
+          <div><div class="hud-small">RACES</div><div class="hud-big" data-games>${this.s.games}</div></div></div>
+        <table class="lb"><thead><tr><th>#</th><th>DRIVER</th><th>RATING</th><th>RANK</th><th>RACES</th></tr></thead>
+          <tbody data-lb><tr><td colspan="5">Loading…</td></tr></tbody></table>
+      </div>`;
+    this.renderAccount();
+    el.querySelector('[data-act=back]')!.addEventListener('click', () => { this.h.netLeave(); this.back(); });
+    el.querySelector('[data-act=host]')!.addEventListener('click', () => {
+      this.h.sound('select');
+      // Start the track pick on a level you own.
+      if (!this.levelOwned(this.s.levelId)) this.s.levelId = LEVELS.find((l) => this.levelOwned(l.id))?.id ?? LEVELS[0].id;
+      this.quickMode = 'host';
+      this.show('quick');
+    });
+    this.renderBrowse();
+    this.h.netOpen();
+    this.h.refreshLeaderboard();
+  }
+
+  /** Ranking: rating, rank, races, explanation and the leaderboard. */
+  private renderRanking(): void {
+    const el = this.screens.get('ranking')!;
+    const s = this.s;
+    el.innerHTML = `
+      <div class="title">RANKING</div>
+      <div class="panel" style="max-width:720px">
         <div class="rating"><div><div class="hud-small">RATING</div><div class="big" data-rating>${s.rating}</div></div>
           <div><div class="hud-small">RANK</div><div class="hud-big" data-rank>${rankName(s.rating)}</div></div>
           <div><div class="hud-small">RACES</div><div class="hud-big" data-games>${s.games}</div></div></div>
         <div class="note" style="margin-top:6px">${RANK_TEXT}</div>
-        <div class="row" style="margin-top:10px"><span class="label">Max wait</span>
-          ${([15, 30, 45] as const).map((n) => `<button class="chip ${n === (s.matchWait ?? 30) ? 'on' : ''}" data-wait="${n}">${n} s</button>`).join('')}</div>
-        <div class="note" style="margin-top:2px">A race prefers <b>4 drivers</b>. If 4 are found it starts at once; otherwise, after the wait time you pick here, it starts with the drivers found so far (at least 2). Longer = bigger races, shorter = faster start.</div>
-        <div class="row" style="margin-top:14px">
-          <button class="btn primary" data-act="find">Find Match</button>
-          <button class="btn small" data-act="cancel" style="display:none">Cancel</button>
-        </div>
-        <div class="status" data-status>Matchmaking pairs you with drivers of a similar rating. Win to climb the ladder.</div>
         <div class="row" style="justify-content:space-between;margin-top:14px">
           <span class="hud-small">LEADERBOARD</span><button class="chip" data-act="refresh">Refresh</button></div>
         <table class="lb"><thead><tr><th>#</th><th>DRIVER</th><th>RATING</th><th>RANK</th><th>RACES</th></tr></thead>
           <tbody data-lb><tr><td colspan="5">Loading…</td></tr></tbody></table>
         <div class="row" style="margin-top:16px"><button class="btn small" data-act="back">Back</button></div>
       </div>`;
-    this.renderAccount();
-    el.querySelector('[data-act=find]')!.addEventListener('click', () => {
-      if (!s.authToken) { this.setNetStatus('Sign in with Google or Discord first.'); return; }
-      this.h.sound('select');
-      this.h.findMatch();
-    });
-    el.querySelector('[data-act=cancel]')!.addEventListener('click', () => { this.h.sound('back'); this.h.cancelMatch(); });
-    el.querySelectorAll<HTMLElement>('[data-wait]').forEach((c) => c.addEventListener('click', () => {
-      s.matchWait = +c.dataset.wait! as Settings['matchWait'];
-      this.commit(); this.h.sound('select');
-      this.h.matchWaitChanged?.(); // already searching: the new wait time applies at once
-      el.querySelectorAll<HTMLElement>('[data-wait]').forEach((b) => b.classList.toggle('on', b === c));
-    }));
     el.querySelector('[data-act=refresh]')!.addEventListener('click', () => { this.h.sound('select'); this.h.refreshLeaderboard(); });
-    el.querySelector('[data-act=back]')!.addEventListener('click', () => { this.h.cancelMatch(); this.back(); });
+    el.querySelector('[data-act=back]')!.addEventListener('click', () => this.back());
     this.h.refreshLeaderboard();
+  }
+
+  // Live lobby state pushed by the server (see App.onNet).
+  private lobbies: LobbyInfo[] = [];
+  private lobby: LobbyInfo | null = null;
+  private onlineCount = 0;
+  private netName = '';
+  private netId = '';
+  /** Quick screen purpose: a normal race, hosting a new lobby, or changing the track of your lobby. */
+  private quickMode: 'race' | 'host' | 'edit' = 'race';
+  /** Garage opened from the lobby: picking a car there sends it to the lobby. */
+  private garageLobby = false;
+
+  private levelOwned(id: string): boolean {
+    return UNLOCK_ALL || levelPrice(id) === 0 || this.s.ownedCars.includes(levelItem(id));
+  }
+
+  private levelName(id: string): string {
+    return LEVELS.find((l) => l.id === id)?.name ?? id;
+  }
+
+  setNetUser(id: string, name: string): void {
+    this.netId = id;
+    this.netName = name;
+    this.updateNetHeader();
+    this.renderLobby();
+  }
+
+  setLobbies(lobbies: LobbyInfo[], online: number): void {
+    this.lobbies = lobbies;
+    this.onlineCount = online;
+    this.updateNetHeader();
+    this.renderBrowse();
+  }
+
+  setLobby(l: LobbyInfo | null): void {
+    this.lobby = l;
+    this.renderLobby();
+    if (l) {
+      // Created or joined: the lobby screen replaces the list / track pick.
+      if (this.current === 'netplay' || (this.current === 'quick' && this.quickMode === 'host')) {
+        this.history = ['main', 'netplay'];
+        this.show('lobby', false);
+      }
+    } else if (this.current === 'lobby' || (this.current === 'quick' && this.quickMode === 'edit') || (this.current === 'garage' && this.garageLobby)) {
+      this.history = ['main'];
+      this.show('netplay', false);
+    }
+  }
+
+  /** Leave the lobby and return to the list. */
+  private leaveLobby(): void {
+    this.h.netLeave();
+    this.lobby = null;
+    this.history = ['main'];
+    this.show('netplay', false);
+  }
+
+  private updateNetHeader(): void {
+    if (this.netName) this.setNetStatus(`Online as ${this.netName} · ${this.onlineCount} online`);
+  }
+
+  /** The lobby list. */
+  private renderBrowse(): void {
+    const box = this.screens.get('netplay')?.querySelector<HTMLElement>('[data-browse]');
+    if (!box) return;
+    const rows = this.lobbies.map((l) => {
+      const open = l.status === 'waiting' && l.n < l.max;
+      return `<tr><td>${esc(l.host)}</td><td>${esc(this.levelName(l.level))}</td><td>${l.laps}</td><td>${l.n}/${l.max}</td>
+        <td>${l.status === 'racing' ? 'Racing' : l.n >= l.max ? 'Full' : 'Waiting'}</td>
+        <td style="text-align:right">${open ? `<button class="btn small" data-join="${l.id}">Join</button>` : ''}</td></tr>`;
+    }).join('');
+    box.innerHTML = `
+      <table class="lb lobbies"><thead><tr><th>HOST</th><th>LEVEL</th><th>LAPS</th><th>PLAYERS</th><th>STATUS</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6" class="empty">No lobbies yet — host one!</td></tr>'}</tbody></table>`;
+    box.querySelectorAll<HTMLElement>('[data-join]').forEach((b) => b.addEventListener('click', () => { this.h.sound('select'); this.h.netJoin(b.dataset.join!); }));
+  }
+
+  /** The lobby screen: player slots and the ready / start buttons. */
+  private renderLobby(): void {
+    const el = this.screens.get('lobby');
+    if (!el) return;
+    const l = this.lobby;
+    if (!l) { el.innerHTML = ''; return; }
+    const meIsHost = l.hostId === this.netId;
+    const me = l.members?.find((m) => m.id === this.netId);
+    const members = l.members ?? [];
+    const others = members.filter((m) => m.id !== l.hostId);
+    const canStart = others.every((m) => m.ready) && l.status === 'waiting';
+    const slots = Array.from({ length: l.max }, (_, i) => members[i]);
+    el.innerHTML = `
+      <div class="title">${esc(this.levelName(l.level).toUpperCase())} · ${l.laps} LAP${l.laps === 1 ? '' : 'S'}</div>
+      <div class="panel" style="max-width:760px">
+        <div class="slots">${slots.map((m) => m ? `
+          <div class="slot ${m.id === this.netId ? 'me' : ''}">
+            <span class="sname">${esc(m.name)}${m.id === l.hostId ? ' <span class="star">★</span>' : ''}</span>
+            <span class="scar">${esc(carById(m.car.id).name)}</span>
+            <span class="swatch dot" style="background:${m.car.paint}"></span>
+            <span class="tag ${m.id === l.hostId ? 'host' : m.ready ? 'ready' : 'wait'}">${m.id === l.hostId ? 'HOST' : m.ready ? 'READY' : 'NOT READY'}</span>
+          </div>` : '<div class="slot empty">—</div>').join('')}</div>
+        <div class="row" style="justify-content:space-between;margin-top:18px">
+          <span style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn small" data-act="lleave">Leave</button>
+            <button class="btn small" data-act="lcar">Change Car</button>
+            ${meIsHost ? '<button class="btn small" data-act="ltrack">Change Track</button>' : ''}</span>
+          ${meIsHost
+            ? `<button class="btn primary" data-act="lstart" ${canStart ? '' : 'disabled'}>${l.status === 'racing' ? 'Race running…' : canStart ? 'Start Race ▸' : `Start ${others.filter((m) => m.ready).length}/${others.length} ready`}</button>`
+            : `<button class="btn primary ${me?.ready ? '' : 'readybtn'}" data-act="lready">${me?.ready ? '✓ Ready · tap to cancel' : 'READY'}</button>`}
+        </div>
+      </div>`;
+    const on = (sel: string, fn: () => void) => el.querySelector(sel)?.addEventListener('click', () => { this.h.sound('select'); fn(); });
+    on('[data-act=lleave]', () => this.leaveLobby());
+    on('[data-act=lcar]', () => { this.garageLobby = true; this.show('garage'); });
+    on('[data-act=ltrack]', () => {
+      this.s.levelId = l.level;
+      this.s.lapsByLevel ??= {};
+      this.s.lapsByLevel[l.level] = l.laps;
+      this.s.weather[l.level] = l.weather as WeatherName;
+      this.quickMode = 'edit';
+      this.show('quick');
+    });
+    on('[data-act=lready]', () => this.h.netReady(!me?.ready));
+    on('[data-act=lstart]', () => this.h.netStart());
+    // After a redraw (the server pushes updates) keep the focus inside the screen.
+    if (this.current === 'lobby' && !el.contains(document.activeElement)) el.querySelector<HTMLElement>('.btn.primary')?.focus({ preventScroll: true });
   }
 
   /** Sign-in state changed: redraw the account block (Netplay screen) if it is showing. */
@@ -481,7 +664,8 @@ export class Menu {
   private renderAccount(): void {
     for (const screen of (['netplay', 'options'] as const)) {
       const box = this.screens.get(screen)?.querySelector<HTMLElement>('[data-account]');
-      if (box) this.renderAccountInto(box);
+      if (box && screen === 'netplay' && this.s.authToken) box.innerHTML = '';
+      else if (box) this.renderAccountInto(box);
     }
   }
 
@@ -501,8 +685,7 @@ export class Menu {
       box.querySelector('[data-act=signout]')!.addEventListener('click', () => { this.h.sound('back'); this.h.signOut(); });
       return;
     }
-    box.innerHTML = `<div class="row"><span class="label">Account</span><span class="note" data-signin>Checking sign-in options…</span></div>
-      <div class="note">Sign in to race online, buy cars and levels, and get on the track-record boards. Quick races work without an account.</div>`;
+    box.innerHTML = `<div class="row"><span class="label">Account</span><span class="note" data-signin>Checking sign-in options…</span></div>`;
     void this.h.providers().then((p) => {
       const slot = box.querySelector<HTMLElement>('[data-signin]');
       if (!slot) return;
@@ -524,32 +707,29 @@ export class Menu {
     });
   }
 
-  setNetStatus(text: string, searching = false): void {
-    const el = this.screens.get('netplay')!;
-    const st = el.querySelector('[data-status]');
+  setNetStatus(text: string): void {
+    const st = this.screens.get('netplay')!.querySelector('[data-status]');
     if (st) st.textContent = text;
-    const find = el.querySelector<HTMLElement>('[data-act=find]');
-    const cancel = el.querySelector<HTMLElement>('[data-act=cancel]');
-    if (find) find.style.display = searching ? 'none' : '';
-    if (cancel) cancel.style.display = searching ? '' : 'none';
   }
 
   setLeaderboard(rows: LeaderRow[] | null, message?: string): void {
     const html = !rows || rows.length === 0
       ? `<tr><td colspan="5">${esc(message ?? 'No ranked drivers yet — race online to get on the board!')}</td></tr>`
-      : rows.map((r) => `<tr class="${r.isMe ? 'me' : ''}"><td>${r.rank}</td><td>${esc(r.name)}</td><td>${r.rating}</td><td>${rankName(r.rating)}</td><td>${r.games}</td></tr>`).join('');
-    for (const n of ['netplay', 'leaderboard'] as ScreenName[]) {
+      : rows.map((r, i) => `${i > 0 && r.rank > rows[i - 1].rank + 1 ? '<tr class="gap"><td colspan="5">· · ·</td></tr>' : ''}<tr class="${r.isMe ? 'me' : ''}"><td>${r.rank}</td><td>${esc(r.name)}</td><td>${r.rating}</td><td>${rankName(r.rating)}</td><td>${r.games}</td></tr>`).join('');
+    for (const n of ['netplay', 'ranking', 'leaderboard'] as ScreenName[]) {
       const tb = this.screens.get(n)!.querySelector('[data-lb]');
       if (tb) tb.innerHTML = html;
     }
   }
 
   updateRating(): void {
-    const el = this.screens.get('netplay')!;
-    const set = (sel: string, v: string) => { const n = el.querySelector(sel); if (n) n.textContent = v; };
-    set('[data-rating]', String(this.s.rating));
-    set('[data-rank]', rankName(this.s.rating));
-    set('[data-games]', String(this.s.games));
+    for (const name of ['netplay', 'ranking'] as ScreenName[]) {
+      const el = this.screens.get(name)!;
+      const set = (sel: string, v: string) => { const n = el.querySelector(sel); if (n) n.textContent = v; };
+      set('[data-rating]', String(this.s.rating));
+      set('[data-rank]', rankName(this.s.rating));
+      set('[data-games]', String(this.s.games));
+    }
   }
 
   private renderOptions(): void {
@@ -583,22 +763,21 @@ export class Menu {
           <input type="range" min="0.5" max="1" step="0.05" value="${s.lighting ?? 1}" data-lighting></div>
         <div class="row"><span class="label">Beat lights</span>
           <button class="chip ${(s.beatSides ?? 1) === 1 ? 'on' : ''}" data-beatsides="1">One side</button>
-          <button class="chip ${s.beatSides === 2 ? 'on' : ''}" data-beatsides="2">Both sides</button>
-          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">Which neon strips along the road pulse to the music.</span></div>
+          <button class="chip ${s.beatSides === 2 ? 'on' : ''}" data-beatsides="2">Both sides</button></div>
         <div class="row"><span class="label">VHS look</span>
           <button class="chip ${s.vhs === true ? 'on' : ''}" data-vhs="1">On</button>
-          <button class="chip ${s.vhs !== true ? 'on' : ''}" data-vhs="0">Off</button>
-          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">80s videotape picture: scanlines, tape wobble, colour bleed.</span></div>
+          <button class="chip ${s.vhs !== true ? 'on' : ''}" data-vhs="0">Off</button></div>
         <div class="row"><span class="label">AI level</span>
           ${(['easy', 'normal', 'hard', 'impossible'] as const).map((d) => `<button class="chip ${d === (s.difficulty ?? 'normal') ? 'on' : ''}" data-diff="${d}">${d}</button>`).join('')}</div>
         <div class="row"><span class="label">Graphics</span>
           <button class="chip ${s.qualityAuto !== false ? 'on' : ''}" data-q="auto">Auto</button>
-          ${(['low', 'medium', 'high'] as const).map((q) => `<button class="chip ${s.qualityAuto === false && q === s.quality ? 'on' : ''}" data-q="${q}">${q}</button>`).join('')}
-          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${s.qualityAuto !== false ? `Auto picked <b>${detectGpu().tier}</b> (${esc(detectGpu().reason)}).` : `Detected: ${esc(detectGpu().reason)} → ${detectGpu().tier}.`}</span></div>
+          ${(['low', 'medium', 'high'] as const).map((q) => `<button class="chip ${s.qualityAuto === false && q === s.quality ? 'on' : ''}" data-q="${q}">${q}</button>`).join('')}</div>
+        <div class="row"><span class="label">Resolution</span>
+          <button class="chip ${!s.resScale ? 'on' : ''}" data-res="auto">Auto</button>
+          ${[0.5, 0.75, 1, 1.5, 2].map((k) => `<button class="chip ${s.resScale === k ? 'on' : ''}" data-res="${k}">${k * 100}%</button>`).join('')}</div>
         ${TOUCH ? `<div class="row"><span class="label">Touch</span>
           ${([['buttons', '◀ ▶ Buttons'], ['stick', 'Stick'], ['tilt', 'Tilt']] as const).map(([k, l]) => `<button class="chip ${(s.touchControls ?? 'buttons') === k ? 'on' : ''}" data-touch="${k}">${l}</button>`).join('')}
-          <button class="chip ${s.autoGas !== false ? 'on' : ''}" data-autogas>Auto gas</button>
-          <span style="font-family:Arial,sans-serif;font-size:12px;opacity:.8">${(s.touchControls ?? 'buttons') === 'tilt' ? 'Steer by tilting the phone like a wheel.' : (s.touchControls ?? 'buttons') === 'stick' ? 'Steer with the stick on the left.' : 'Steer with the arrow buttons on the left.'} ${s.autoGas !== false ? 'Gas is always on; hold BRAKE to slow down.' : 'Hold GAS to accelerate.'}</span></div>` : ''}
+          <button class="chip ${s.autoGas !== false ? 'on' : ''}" data-autogas>Auto gas</button></div>` : ''}
 
         <div class="row" style="margin-top:16px;justify-content:space-between">
           <button class="btn small" data-act="back">Back</button>
@@ -674,6 +853,10 @@ export class Menu {
       s.autoGas = s.autoGas === false;
       this.commit(); this.h.sound('select'); this.h.settingsChanged(); this.renderOptions();
     });
+    el.querySelectorAll<HTMLElement>('[data-res]').forEach((c) => c.addEventListener('click', () => {
+      s.resScale = c.dataset.res === 'auto' ? undefined : Number(c.dataset.res);
+      this.commit(); this.h.sound('select'); this.h.settingsChanged(); this.renderOptions();
+    }));
     el.querySelectorAll<HTMLElement>('[data-q]').forEach((c) => c.addEventListener('click', () => {
       s.qualityAuto = c.dataset.q === 'auto';
       s.quality = c.dataset.q === 'auto' ? detectGpu().tier : c.dataset.q as Settings['quality'];
@@ -806,18 +989,43 @@ export class Menu {
     const el = this.screens.get(this.current)!;
     const items = Array.from(el.querySelectorAll<HTMLElement>('.btn, .chip, .card:not(.locked), .car-card, .swatch'));
     const i = items.indexOf(document.activeElement as HTMLElement);
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-      items[(i + 1) % items.length]?.focus();
-      this.h.sound('hover');
-      e.preventDefault();
-    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-      items[(i - 1 + items.length) % items.length]?.focus();
+    const dir = ({ ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0], ArrowLeft: [-1, 0] } as Record<string, [number, number]>)[e.key];
+    if (dir) {
+      // Spatial navigation: jump to the nearest item in the pressed direction (grids of cars, chip rows...);
+      // nothing that way: wrap to the first / last item.
+      const visible = items.filter((x) => x.offsetParent !== null);
+      let next: HTMLElement | undefined;
+      if (i < 0) next = visible[0];
+      else {
+        const r = items[i].getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        let best = Infinity;
+        for (const x of visible) {
+          if (x === items[i]) continue;
+          const q = x.getBoundingClientRect();
+          const dx = q.left + q.width / 2 - cx, dy = q.top + q.height / 2 - cy;
+          const along = dx * dir[0] + dy * dir[1];
+          if (along <= 4) continue;
+          const across = Math.abs(dx * dir[1] + dy * dir[0]);
+          const score = along + across * 2.5;
+          if (score < best) { best = score; next = x; }
+        }
+        next ??= dir[0] + dir[1] > 0 ? visible[0] : visible[visible.length - 1];
+      }
+      next?.focus();
+      next?.scrollIntoView({ block: 'nearest' });
+      // Garage: moving through the car list shows that car straight away (focus is kept by renderGarage).
+      if (next && this.current === 'garage' && next.dataset.car && next.dataset.car !== this.garageView) {
+        this.garageView = next.dataset.car;
+        this.renderGarage();
+      }
       this.h.sound('hover');
       e.preventDefault();
     } else if (e.key === 'Enter' && i >= 0 && !items[i].matches('button')) {
       items[i].click();
     } else if (e.key === 'Escape' || e.key === 'Backspace') {
-      if (this.current === 'pause') this.h.resume();
+      if (this.current === 'lobby') this.leaveLobby();
+      else if (this.current === 'pause') this.h.resume();
       else if (this.current === 'results') this.h.quitToMenu();
       else if (this.current !== 'main') this.back();
       e.preventDefault();

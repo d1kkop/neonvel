@@ -6,7 +6,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
  * Hand-modelled (Blender) car bodies, loaded as small compressed .glb files from public/models/cars/.
  * Optional: a car style without a model (or a failed download) keeps its procedural body.
  */
-const AVAILABLE = ['asti', 'phoenix', 'gallo', 'duke', 'duntov', 'cheetah', 'nfr']; // body styles with a model (tools/build-cars.mjs)
+const AVAILABLE = ['asti', 'phoenix', 'gallo', 'duke', 'duntov', 'cheetah', 'nfr', 'classic']; // body styles with a model (tools/build-cars.mjs)
 const STYLE_FOR: Record<string, string> = {}; // body style → model file (default: same name)
 
 const models = new Map<string, THREE.Object3D>();

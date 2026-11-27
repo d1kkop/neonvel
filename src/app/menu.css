@@ -107,6 +107,8 @@ table.lb tr.gap td { text-align: center; opacity: .5; padding: 2px; border-botto
 #hud.active { display: block; }
 .hud-tl, .hud-tr { position: absolute; top: 14px; font-weight: 900; font-style: italic; text-shadow: 0 0 8px var(--pink); }
 .hud-tl { left: 16px; } .hud-tr { right: 16px; text-align: right; }
+.hud-fps { position: absolute; right: 18px; bottom: 0; font-style: italic; font-weight: 700; font-size: 10px; line-height: 1.2; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--cyan); opacity: .75; text-shadow: 0 0 6px var(--cyan), 0 0 2px #000; white-space: pre; }
 .hud-big { font-size: 34px; } .hud-small { font-size: 13px; letter-spacing: .15em; color: var(--cyan); text-shadow: 0 0 6px var(--cyan); }
 .hud-speed { position: absolute; right: 18px; bottom: 18px; text-align: right; }
 .hud-speed .v { font-size: 52px; font-weight: 900; font-style: italic; text-shadow: 0 0 10px var(--cyan); }
@@ -316,3 +318,23 @@ table.lb tr.gap td { text-align: center; opacity: .5; padding: 2px; border-botto
   .car-canvas { height: 44vh; }
   .car-view h2 { margin-top: 4px; font-size: 18px; }
 }
+
+/* Netplay lobby list and lobby screen */
+table.lobbies td.empty { text-align: center; padding: 22px 6px; opacity: .7; }
+.slots { display: grid; gap: 8px; }
+.slot { display: flex; align-items: center; gap: 14px; padding: 8px 16px; border: 2px solid rgba(0, 229, 255, .35); border-radius: 8px; background: rgba(0, 0, 0, .3); min-height: 44px; }
+.slot.me { border-color: var(--yellow); }
+.slot.empty { justify-content: center; opacity: .35; border-style: dashed; }
+.slot .sname { flex: 1; font-weight: 900; font-size: 15px; }
+.slot .star { color: var(--yellow); }
+.slot .scar { font-family: Arial, sans-serif; font-size: 13px; opacity: .85; }
+.slot .swatch.dot { cursor: default; flex: none; }
+.slot .tag { min-width: 64px; text-align: center; font-size: 11px; letter-spacing: .12em; padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, .25); opacity: .7; }
+.slot .tag { min-width: 84px; }
+.slot .tag.ready { color: #062; background: #39ff6a; border-color: #39ff6a; opacity: 1; font-weight: 900; }
+.slot .tag.host { color: var(--yellow); border-color: var(--yellow); opacity: 1; }
+.slot .tag.wait { color: #999; }
+.btn.readybtn { background: #39ff6a; border-color: #39ff6a; color: #052; }
+/* Drift and boost are the controls that matter: light red so they stand out. */
+.ctl-row.hot .ctl-act { color: #ff8a8a; opacity: 1; font-weight: 700; text-shadow: 0 0 6px rgba(255, 70, 70, .55); }
+.ctl-row.hot .ctl-in { color: #ffc0c0; }

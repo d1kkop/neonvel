@@ -16,7 +16,7 @@ type Player = { s: number; x: number; v: number };
  * Underwater skin lighting: wrapped sun from the surface, cyan/sand hemisphere, caustic light dancing over the
  * upward-facing skin, a wet two-lobe specular, fresnel sheen and rim. `bumpK` adds fine skin relief.
  */
-const SEA_SHADE = /* glsl */ `
+export const SEA_SHADE = /* glsl */ `
 ${NOISE_GLSL}
 float caustic(vec2 p, float t) {
   // Two drifting ridged noise layers multiplied: the bright net of lines sunlight makes through waves.
@@ -92,7 +92,7 @@ const _v = new THREE.Vector3();
 // ------------------------------------------------------------------ sharks
 
 /** Lofted shark, 1 unit long, nose toward -Z. aJaw: 0 upper half, 1 lower half, 0.5 on the mouth seam. */
-export function sharkGeometry(): THREE.BufferGeometry {
+export function sharkGeometry(orca = false): THREE.BufferGeometry {
   const around = 64;
   const along = 120;
   const body = loft(
@@ -100,8 +100,9 @@ export function sharkGeometry(): THREE.BufferGeometry {
       [0.0, 0.025, -0.02, 0.05], [0.05, 0.07, -0.055, 0.5], [0.13, 0.105, -0.085, 0.82], [0.25, 0.125, -0.1, 1.0],
       [0.45, 0.11, -0.09, 0.88], [0.7, 0.065, -0.05, 0.46], [0.88, 0.035, -0.025, 0.2], [1.0, 0.025, -0.015, 0.1],
     ],
-    { length: 1, halfWidth: 0.09, exp: 2.2, tumble: 0, along, around },
+    { length: 1, halfWidth: orca ? 0.125 : 0.09, exp: 2.2, tumble: 0, along, around },
   );
+  if (orca) body.scale(1, 1.18, 1);
   // Which half of the cross-section each vertex is on (relative to that ring's middle).
   const pos = body.getAttribute('position');
   const ringMid = new Map<number, number>();
@@ -130,17 +131,20 @@ export function sharkGeometry(): THREE.BufferGeometry {
   };
   const parts = [
     body.toNonIndexed(),
-    fin([[0.06, 0], [-0.02, 0.15], [-0.1, 0.17], [-0.14, 0]], -0.04, 0, 0.1), // tall swept dorsal fin
+    orca
+      ? fin([[0.07, 0], [0.02, 0.3], [-0.01, 0.31], [-0.1, 0]], -0.03, 0, 0.12) // tall straight orca dorsal
+      : fin([[0.06, 0], [-0.02, 0.15], [-0.1, 0.17], [-0.14, 0]], -0.04, 0, 0.1), // tall swept dorsal fin
     fin([[0, 0], [-0.16, 0.2], [-0.1, 0.02], [-0.13, -0.12]], 0.47), // crescent tail
-    fin([[0, 0], [-0.17, -0.1], [-0.1, 0]], -0.12, 0.9, -0.04), // pectoral R
-    fin([[0, 0], [-0.17, -0.1], [-0.1, 0]], -0.12, -0.9, -0.04), // pectoral L
+    fin(orca ? [[0, 0], [-0.2, -0.15], [-0.12, 0.02]] : [[0, 0], [-0.17, -0.1], [-0.1, 0]], -0.12, 0.9, -0.04), // pectoral R
+    fin(orca ? [[0, 0], [-0.2, -0.15], [-0.12, 0.02]] : [[0, 0], [-0.17, -0.1], [-0.1, 0]], -0.12, -0.9, -0.04), // pectoral L
   ];
   // Keep the smooth loft normals (recomputing after merging would facet the body).
   return mergeGeometries(parts);
 }
 
-function sharkMaterial(): THREE.ShaderMaterial {
+function sharkMaterial(orca = false): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
+    defines: orca ? { ORCA: 1 } : {},
     side: THREE.DoubleSide,
     uniforms: { ...atmosphere, uSwim: { value: 0 }, uJaw: { value: 0 } },
     vertexShader: /* glsl */ `
@@ -187,6 +191,17 @@ function sharkMaterial(): THREE.ShaderMaterial {
         float gz = vLocal.z + 0.235;
         float gills = step(0.0, gz) * step(gz, 0.06) * step(0.72, fract(gz * 75.0)) * step(abs(vLocal.y), 0.035) * step(0.03, abs(vLocal.x));
         col *= 1.0 - gills * 0.55;
+        #ifdef ORCA
+        {
+          // Glossy black with a crisp white belly, white eye patch and a grey saddle behind the dorsal fin.
+          float be = smoothstep(-0.34, -0.26, ln.y + edge * 0.15);
+          col = mix(vec3(0.93, 0.94, 0.95), vec3(0.02, 0.025, 0.03), be);
+          vec2 pe = vec2((vLocal.z + 0.325) / 0.07, (vLocal.y - 0.07) / 0.026);
+          col = mix(col, vec3(0.95), smoothstep(1.0, 0.8, length(pe)) * step(0.02, abs(vLocal.x)));
+          vec2 ps = vec2((vLocal.z - 0.06) / 0.1, (vLocal.y - 0.09) / 0.07);
+          col = mix(col, vec3(0.32, 0.34, 0.37), smoothstep(1.0, 0.7, length(ps)) * step(0.0, ln.y));
+        }
+        #endif
         // Eye.
         float eye = smoothstep(0.011, 0.006, length(vec2(vLocal.z + 0.36, vLocal.y - 0.028))) * step(0.015, abs(vLocal.x));
         col = mix(col, vec3(0.01), eye);
@@ -212,12 +227,13 @@ export class Shark {
   readonly mesh: THREE.Mesh;
   readonly position = new THREE.Vector3();
   readonly dir = new THREE.Vector3(0, 0, -1);
-  private readonly mat = sharkMaterial();
+  private readonly mat: THREE.ShaderMaterial;
   private swim = Math.random() * 6;
   private jaw = 0;
   private readonly tmp = new THREE.Vector3();
 
-  constructor(geo: THREE.BufferGeometry, readonly scale: number) {
+  constructor(geo: THREE.BufferGeometry, readonly scale: number, readonly orca = false) {
+    this.mat = sharkMaterial(orca);
     this.mesh = new THREE.Mesh(geo, this.mat);
     this.mesh.scale.setScalar(scale);
     this.mesh.frustumCulled = false;
@@ -261,11 +277,12 @@ export class CirclingSharks {
   private readonly dir = new THREE.Vector3();
   private readonly nose = new THREE.Vector3();
 
-  constructor(private readonly paths: { centre: THREE.Vector3; radius: number; speed: number; phase: number; scale: number }[]) {
+  constructor(private readonly paths: { centre: THREE.Vector3; radius: number; speed: number; phase: number; scale: number; orca?: boolean }[]) {
     this.group.name = 'circling-sharks';
     const geo = sharkGeometry();
+    const orcaGeo = sharkGeometry(true);
     for (const p of paths) {
-      const s = new Shark(geo, p.scale);
+      const s = new Shark(p.orca ? orcaGeo : geo, p.scale, !!p.orca);
       s.mesh.visible = false;
       this.sharks.push(s);
       this.group.add(s.mesh);
@@ -383,7 +400,9 @@ export function dolphinMaterial(): THREE.ShaderMaterial {
  */
 export class DolphinPod {
   readonly group = new THREE.Group();
-  readonly hunter: Shark;
+  hunter: Shark;
+  private readonly sharkHunter: Shark;
+  private readonly orcaHunter: Shark;
   private readonly dolphins: { mesh: THREE.Mesh; mat: THREE.ShaderMaterial; phase: number; swim: number; prev: THREE.Vector3; dir: THREE.Vector3; fresh: boolean }[] = [];
   private timer = 6; // first visit soon after the start
   private visit = -1; // seconds into the current visit (-1 = away)
@@ -413,9 +432,12 @@ export class DolphinPod {
       this.group.add(mesh);
       this.dolphins.push({ mesh, mat, phase: i * 2.1, swim: 0, prev: new THREE.Vector3(), dir: new THREE.Vector3(), fresh: true });
     }
-    this.hunter = new Shark(sharkGeometry(), hunterScale);
-    this.hunter.mesh.visible = false;
-    this.group.add(this.hunter.mesh);
+    this.sharkHunter = this.hunter = new Shark(sharkGeometry(), hunterScale);
+    this.orcaHunter = new Shark(sharkGeometry(true), hunterScale * 0.8, true);
+    for (const h of [this.sharkHunter, this.orcaHunter]) {
+      h.mesh.visible = false;
+      this.group.add(h.mesh);
+    }
   }
 
   /** Is the hunting shark out right now? */
@@ -433,7 +455,8 @@ export class DolphinPod {
       d.mesh.visible = false;
       d.fresh = true;
     }
-    this.hunter.mesh.visible = false;
+    this.sharkHunter.mesh.visible = false;
+    this.orcaHunter.mesh.visible = false;
     this.hunt.on = false;
   }
 
@@ -530,6 +553,7 @@ export class DolphinPod {
       h.h = 5;
       h.va = 14;
       h.vl = h.vh = 0;
+      this.hunter = Math.random() < 0.2 ? this.orcaHunter : this.sharkHunter;
       this.hunter.dir.copy(this.frame.forward);
       this.hunter.mesh.visible = true;
     }

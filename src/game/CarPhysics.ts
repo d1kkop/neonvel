@@ -39,8 +39,8 @@ export interface CarPhys {
   boostEmpty?: boolean;
   /** Was against a wall last step (a hard knock drains boost once, scraping drains steadily). */
   onWall: boolean;
-  /** Seconds left of a lift-off drift kick (throttle released while steering hard at speed). */
-  liftKick?: number;
+  /** Seconds before a drift may swap sides again. */
+  swapCd?: number;
   // previous step (interpolation)
   ps: number;
   px: number;
@@ -56,9 +56,6 @@ export interface CarSpec {
   maxSteer: number; // rad at standstill
   halfWidth: number;
   length: number;
-  /** Player cars: a brake tap or a quick lift off the throttle while steering hard at speed starts a slide
-   *  (AI cars brake for corners without it and drift with the handbrake). */
-  brakeSlide?: boolean;
 }
 
 export const DEFAULT_SPEC: CarSpec = {
@@ -132,7 +129,7 @@ export function stepPhys(c: CarPhys, inp: InputState & { handbrake?: number; boo
   const powerK = Math.min(1, POWER_V / Math.max(1, Math.abs(c.v)));
   const engine = throttle * spec.accel * (c.boosting ? BOOST.power : 1) * Math.max(0.12, powerK * (1.25 - 0.25 * powerK)) * Math.max(0.15, 1 - speed01 * speed01 * speed01);
   // While drifting the brakes bite less (the slide keeps its speed), but enough to scrub speed off when you need to.
-  const braking = inp.brake * spec.brake * (c.v > 0.5 ? 1 : 0) * (1 - (spec.brakeSlide ? 0.45 : 0.3) * c.drift);
+  const braking = inp.brake * spec.brake * (c.v > 0.5 ? 1 : 0) * (1 - 0.3 * c.drift);
   const drag = 0.0006 * c.v * c.v + 0.15;
   c.v += (engine - braking - drag) * dt;
   // Reverse-ish: brake at standstill backs up slowly.
@@ -142,10 +139,6 @@ export function stepPhys(c: CarPhys, inp: InputState & { handbrake?: number; boo
   if (track.hilly) c.v -= 9.81 * 0.35 * track.slopeAt(c.s) * dt;
   // Above top speed (after a boost) ease back down instead of snapping.
   if (c.v > top) c.v -= (c.v - top) * Math.min(1, dt * 1.5);
-  // Lift-off: letting go of the throttle while steering hard at speed throws the weight forward and the tail
-  // steps out (a short kick window, so just coasting through a bend doesn't keep re-triggering it).
-  c.liftKick = Math.max(0, (c.liftKick ?? 0) - dt);
-  if (spec.brakeSlide && c.throttle > 0.5 && throttle < 0.1 && Math.abs(inp.steer) > 0.85 && c.v > 32) c.liftKick = 0.18;
   c.throttle = throttle;
 
   // --- Steering: less lock at speed; yaw rate limited by grip.
@@ -157,19 +150,21 @@ export function stepPhys(c: CarPhys, inp: InputState & { handbrake?: number; boo
   const vAbs = Math.max(Math.abs(c.v), 0.1);
   let wantYaw = (c.v / spec.wheelbase) * Math.tan(c.steer);
   const hb = inp.handbrake ?? 0;
-  // One handling model: planted grip by default; a drift comes from what you do, not from a mode.
-  // Kick: steer hard at speed plus a brake tap, a quick lift off the throttle, or the handbrake (SPACE).
+  // Planted grip by default; a drift only on the handbrake (SPACE) + steering at speed — you start it, you hold it
+  // (automatic drifts from braking or lifting off gave no control, the player said).
   // Held while you keep steering into the turn; let go of the wheel or counter-steer and it straightens up.
   const steerHard = Math.abs(inp.steer) > 0.5 && c.v > 16;
-  const kick = steerHard && (hb > 0.5 || (!!spec.brakeSlide && inp.brake > 0.25 && c.v > 25) || (c.liftKick ?? 0) > 0);
+  const kick = steerHard && hb > 0.5;
+  c.swapCd = Math.max(0, (c.swapCd ?? 0) - dt);
   const into = c.driftDir * inp.steer; // > 0 steering into the drift, < 0 counter-steering
   // A swap needs the other way PLUS a handbrake / brake tap; just steering out of a drift ends it (keyboard steering is
   // always full lock, so steering alone used to flip straight into a drift the other way — "can't steer").
-  if (c.drift > 0.3 && into < -0.7 && c.v > 16 && (hb > 0.5 || inp.brake > 0.25)) {
+  if (c.drift > 0.3 && into < -0.7 && c.v > 16 && hb > 0.5 && c.swapCd === 0) {
     // Switch sides (flick from one drift into the other, like an S-bend): the slide flips but loses some
     // of its bite for a moment, so the weight transfer is felt.
     c.driftDir = -c.driftDir;
     c.drift = Math.min(c.drift, 0.6);
+    c.swapCd = 0.6; // no flicking back and forth faster than a real car's weight can swing
   } else if (kick && c.drift < 0.3) c.driftDir = Math.sign(inp.steer) || 1;
   // Hold: steer into the drift — or keep the handbrake held, which also holds it on a straight with the wheel
   // centred (the body stays angled and you steer the line).
@@ -188,7 +183,8 @@ export function stepPhys(c: CarPhys, inp: InputState & { handbrake?: number; boo
   // Soft limit (tanh): the car eases into the grip limit instead of hitting a wall — and gets a little extra.
   const yawCap = yawLimit * over * 1.1;
   wantYaw = yawCap * Math.tanh(wantYaw / yawCap);
-  c.yawRate += (wantYaw - c.yawRate) * (1 - Math.exp(-dt * 15));
+  // In a drift the body turns slower (its mass is swinging): no twitchy left-right corrections.
+  c.yawRate += (wantYaw - c.yawRate) * (1 - Math.exp(-dt * (15 - 11 * c.drift)));
 
   // --- Track kinematics (curvature rotates the track frame under the car).
   const kappa = track.curvatureAt(c.s);
@@ -222,7 +218,7 @@ export function stepPhys(c: CarPhys, inp: InputState & { handbrake?: number; boo
   const slipLook = Math.max(-0.07, Math.min(0.07, ((c.v * c.yawRate) / Math.max(1, spec.grip)) * 0.06)) * (1 - d);
   const driftTarget = c.driftDir * d * (0.27 + 0.3 * Math.max(0, inp.steer * c.driftDir) + 0.06 * throttle) + slipLook; // throttle swings the tail a bit wider // ~17..34 degrees
   // Spring with a little overshoot: a side swap swings through like a pendulum (weight transfer).
-  c.driftAngleVel += ((driftTarget - c.driftAngle) * 55 - c.driftAngleVel * 11) * dt;
+  c.driftAngleVel += ((driftTarget - c.driftAngle) * 14 - c.driftAngleVel * 6.5) * dt; // softer spring: the angle swings with weight
   c.driftAngle += c.driftAngleVel * dt;
   c.slip = Math.max(c.slip, d * 0.8 * Math.min(1, c.v / 25));
   // Driving on the throttle fills the bar slowly, so drivers who never drift still get boost.

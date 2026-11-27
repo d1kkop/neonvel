@@ -187,6 +187,10 @@ export class Renderer {
   private minRatio = 1;
 
   /** Range the dynamic resolution may move in (weak GPUs may drop below 1x). */
+  get maxPixelRatio(): number {
+    return this.maxRatio;
+  }
+
   setRatioRange(min: number, max: number): void {
     this.minRatio = min;
     this.maxRatio = max;

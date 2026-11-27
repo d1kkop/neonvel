@@ -103,9 +103,15 @@ export async function grant(db: D1Database, playerId: string, item: string, sour
   await db.prepare('INSERT OR IGNORE INTO purchases (player_id, item, source, ref, created) VALUES (?, ?, ?, ?, ?)').bind(playerId, item, source, ref, Date.now()).run();
 }
 
-export async function leaderboard(db: D1Database) {
-  const r = await db.prepare('SELECT name, rating, games, wins FROM players WHERE games > 0 ORDER BY rating DESC LIMIT 50').all<{ name: string; rating: number; games: number; wins: number }>();
-  return r.results;
+/** Rating board: the top 20, plus the asking player's own row (with its `rank`) when they are not in it. */
+export async function leaderboard(db: D1Database, player: PlayerRow | null = null) {
+  const r = await db.prepare('SELECT name, rating, games, wins FROM players WHERE games > 0 ORDER BY rating DESC LIMIT 20').all<{ name: string; rating: number; games: number; wins: number; rank?: number }>();
+  const rows = r.results;
+  if (player && player.games > 0 && !rows.some((x) => x.name === player.name)) {
+    const n = (await db.prepare('SELECT COUNT(*) AS n FROM players WHERE games > 0 AND rating > ?').bind(player.rating).first<{ n: number }>())!.n;
+    rows.push({ name: player.name, rating: player.rating, games: player.games, wins: 0, rank: n + 1 });
+  }
+  return rows;
 }
 
 // ------------------------------------------------------------------ track records
@@ -131,7 +137,7 @@ export async function submitLap(db: D1Database, player: PlayerRow, level: string
 
 /** Top 50 of a track, plus where the player stands (also outside the top 50). */
 export async function lapBoard(db: D1Database, level: string, player: PlayerRow | null): Promise<Record<string, unknown>> {
-  const top = (await db.prepare('SELECT p.name AS name, l.ms AS ms, l.car AS car FROM lap_times l JOIN players p ON p.id = l.player_id WHERE l.level = ? ORDER BY l.ms ASC, l.created ASC LIMIT 50').bind(level).all()).results;
+  const top = (await db.prepare('SELECT p.name AS name, l.ms AS ms, l.car AS car FROM lap_times l JOIN players p ON p.id = l.player_id WHERE l.level = ? ORDER BY l.ms ASC, l.created ASC LIMIT 20').bind(level).all()).results;
   let me: { rank: number; ms: number } | null = null;
   if (player) {
     const row = await db.prepare('SELECT ms FROM lap_times WHERE player_id = ? AND level = ?').bind(player.id, level).first<{ ms: number }>();

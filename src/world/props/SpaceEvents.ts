@@ -92,7 +92,7 @@ export class ShootingStars {
   readonly group = new THREE.Group();
   private readonly stars: Streak[] = [];
   private readonly meteors: Streak[] = [];
-  private starTimer = 3;
+  private starTimer = 1.5;
   private meteorTimer = 14;
   private readonly frame = makeFrame();
   private readonly eye = new THREE.Vector3();
@@ -114,7 +114,7 @@ export class ShootingStars {
       }
       return { mesh, head, mat, pos: new THREE.Vector3(), vel: new THREE.Vector3(), age: 0, life: 0, len: 1, width: 1 };
     };
-    for (let i = 0; i < 4; i++) this.stars.push(mk(false));
+    for (let i = 0; i < 5; i++) this.stars.push(mk(false));
     for (let i = 0; i < 2; i++) this.meteors.push(mk(true));
   }
 
@@ -138,7 +138,7 @@ export class ShootingStars {
       s.vel.set(Math.cos(side), -(0.15 + Math.random() * 0.6), Math.sin(side)).normalize().multiplyScalar(2600 + Math.random() * 1600);
       s.life = 0.45 + Math.random() * 0.6;
       s.len = 380 + Math.random() * 420;
-      s.width = 9 + Math.random() * 7;
+      s.width = 16 + Math.random() * 10;
     }
     s.age = 0;
     s.mesh.visible = true;
@@ -154,7 +154,7 @@ export class ShootingStars {
       const free = this.stars.find((s) => !s.mesh.visible);
       if (free) this.launch(free, false);
       // Mostly singles a few seconds apart; sometimes two or three in quick succession.
-      this.starTimer = Math.random() < 0.3 ? 0.25 + Math.random() * 0.5 : 3 + Math.random() * 6;
+      this.starTimer = Math.random() < 0.3 ? 0.25 + Math.random() * 0.5 : 2 + Math.random() * 3.5;
     }
     this.meteorTimer -= dt;
     if (this.meteorTimer <= 0) {

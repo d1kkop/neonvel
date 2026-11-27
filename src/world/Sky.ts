@@ -39,7 +39,12 @@ export class Sky {
           vec4 w = modelMatrix * vec4(position, 1.0);
           vWorld = w.xyz;
           gl_Position = projectionMatrix * viewMatrix * w;
-          gl_Position.z = gl_Position.w; // always at far plane
+          // Always at the far plane (with the reversed depth buffer the far plane is depth 0).
+          #ifdef USE_REVERSED_DEPTH_BUFFER
+          gl_Position.z = 1e-6 * gl_Position.w;
+          #else
+          gl_Position.z = gl_Position.w;
+          #endif
         }`,
       fragmentShader: /* glsl */ `
         uniform vec3 uMistColor;

@@ -222,7 +222,7 @@ async function api(req: Request, env: Env, url: URL): Promise<Response | null> {
   }
   if (path === '/store/confirm') return json(await confirm(env, url.searchParams.get('session_id') ?? ''));
   if (path === '/laptimes') return json(await lapBoard(db, url.searchParams.get('level') ?? '', await playerFor(db, tokenQ)));
-  if (path === '/leaderboard') return json(await leaderboard(db));
+  if (path === '/leaderboard') return json(await leaderboard(db, await playerFor(db, tokenQ)));
   return null;
 }
 

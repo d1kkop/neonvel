@@ -248,7 +248,7 @@ export class World {
       this.scene.add(car.group);
       const row = Math.floor(slot / 2);
       const x = (slot % 2 === 0 ? -1 : 1) * this.track.width * 0.22;
-      const spec: CarSpec = { ...DEFAULT_SPEC, ...(setup.spec ?? {}), length: car.style.length, halfWidth: car.style.width / 2, brakeSlide: i === 0 };
+      const spec: CarSpec = { ...DEFAULT_SPEC, ...(setup.spec ?? {}), length: car.style.length, halfWidth: car.style.width / 2 };
       this.cars.push({
         car,
         name: netName ?? (i === 0 ? 'YOU' : (setup as { name?: string }).name ?? `CPU ${i}`),
@@ -513,6 +513,10 @@ export class World {
       c.visPitch = (c.visPitch ?? 0) + (tp - (c.visPitch ?? 0)) * 0.08;
       this.eTilt.set(c.visPitch, 0, c.visRoll);
       g.quaternion.multiply(this.qTilt.setFromEuler(this.eTilt));
+      // The wheels tilt with the body: lift the car by what the lean pushes the lowest wheel down, so no tyre
+      // sinks into the road (long, wide model cars leaned their outside wheels a few cm into the asphalt).
+      const st = c.car.style;
+      g.position.addScaledVector(this.up, Math.abs(c.visRoll) * st.width * 0.42 + Math.abs(c.visPitch) * st.length * 0.32);
       // Brake lights: braking, handbrake or drifting (remote cars: deceleration / drift).
       const braking = c.remote ? (p.v < (c.prevV ?? p.v) - 0.15 || p.drift > 0.3 ? 1 : 0) : (c.input.brake > 0.1 || (c.input.handbrake ?? 0) > 0.3 || p.drift > 0.3) && p.v > 1 ? 1 : 0;
       c.prevV = p.v;

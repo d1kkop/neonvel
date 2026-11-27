@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Rng } from '../util/random';
 import { designs } from '../world/billboardArt';
 import { makeFrame } from '../track/Track';
-import { type CodePanel, createCodePanels, createTrojanHorse, VirusWorm } from '../world/props/CyberProps';
+import { createTrojanHorse, Hacker, VirusWorm } from '../world/props/CyberProps';
 import { createFloatingShapes } from '../world/props/LevelProps';
 import { Terrain } from '../world/terrain/Terrain';
 import type { LevelDef } from './types';
@@ -65,39 +65,7 @@ export const cyberGrid: LevelDef = {
     }
     scene.add(createFloatingShapes(shapes));
 
-    // --- Falling code: screens in the air along the road, gates of code over it, and code towers far away.
-    const GREEN = new THREE.Color('#3dff9e'), CYAN = new THREE.Color('#00e5ff'), PINK = new THREE.Color('#ff2bd6');
-    const panels: CodePanel[] = [];
     const f = makeFrame();
-    const yawOf = (dx: number, dz: number) => Math.atan2(dx, dz); // a panel's face (+Z) turned toward (dx, dz)
-    for (let d = 60; d < track.length; d += 85) {
-      if (track.sectionAt(d, 25)) continue;
-      track.frameAt(d, f);
-      const kind = rng.int(0, 3);
-      if (kind === 0) {
-        // A gate of code right over the road, facing the driver (see-through: it only adds light).
-        panels.push({ x: f.position.x, y: f.position.y + 15, z: f.position.z, w: track.width + 10, h: 12, yaw: yawOf(-f.forward.x, -f.forward.z), glyph: 0.9, color: GREEN.clone().multiplyScalar(0.8) });
-      } else {
-        // A screen beside the road: half of them face the driver, half run along the road like a wall of code.
-        const side = rng.chance(0.5) ? 1 : -1;
-        const lat = side * (track.width / 2 + rng.range(9, 34));
-        const w = rng.range(10, 20), h = rng.range(14, 34);
-        const along = kind === 1;
-        panels.push({
-          x: f.position.x + f.right.x * lat, y: f.position.y + rng.range(3, 12) + h / 2, z: f.position.z + f.right.z * lat,
-          w, h, yaw: along ? yawOf(f.right.x * -side, f.right.z * -side) : yawOf(-f.forward.x, -f.forward.z),
-          glyph: rng.range(0.7, 1.3), color: (rng.chance(0.75) ? GREEN : rng.chance(0.5) ? CYAN : PINK).clone().multiplyScalar(0.9),
-        });
-      }
-    }
-    for (let i = 0; i < 46; i++) {
-      const a = rng.range(0, Math.PI * 2), r = rng.range(260, 1500);
-      const x = 250 + Math.cos(a) * r, z = 400 + Math.sin(a) * r;
-      if (track.distanceSqTo(x, z) < 120 * 120) continue;
-      const h = rng.range(160, 520), w = rng.range(26, 70);
-      panels.push({ x, y: h / 2, z, w, h, yaw: rng.range(0, Math.PI), glyph: rng.range(5, 9), color: (rng.chance(0.8) ? GREEN : CYAN).clone().multiplyScalar(0.55) });
-    }
-    scene.add(createCodePanels(panels));
 
     // --- Two Trojan horses standing on the grid floor beside the elevated road, side-on to it.
     const horseAt = (d: number, side: number) => {
@@ -118,11 +86,50 @@ export const cyberGrid: LevelDef = {
 
     // --- The worm (and a smaller green one): spiked viruses winding through the air above the track.
     const worms = [
-      new VirusWorm(new THREE.Vector3(250, track.height, 400), 330, 62, '#ff2a4a', 3.2),
-      new VirusWorm(new THREE.Vector3(330, track.height, 330), 190, 36, '#3dff9e', 1.9),
+      new VirusWorm(new THREE.Vector3(250, track.height, 400), 330, 34, '#ff2a4a', 4.2),
+      new VirusWorm(new THREE.Vector3(330, track.height, 330), 190, 22, '#3dff9e', 2.4),
     ];
     for (const w of worms) scene.add(w.group);
-    ctx.onUpdate((time) => { worms[0].update(time); worms[1].update(time * 1.3 + 40); });
+    // The big worm hunts you along the road: it comes up from behind, overtakes low over your head with WORM.EXE
+    // over its head, runs on ahead into the fog, then a while later comes round from behind again.
+    {
+      const wf = makeFrame();
+      let rel = -260, wait = 4;
+      worms[0].follow = {
+        at: (s, out) => {
+          track.frameAt(((s % track.length) + track.length) % track.length, wf);
+          return out.copy(wf.position)
+            .addScaledVector(wf.right, 9 * Math.sin(s * 0.02))
+            .addScaledVector(wf.up, 13 + 5 * Math.sin(s * 0.013 + 1));
+        },
+        headS: (_time, dt) => {
+          const pl = ctx.player();
+          if (wait > 0) { wait -= dt; if (wait <= 0) rel = -260; }
+          else { rel += dt * 24; if (rel > 420) wait = 10; }
+          return pl.s + rel;
+        },
+      };
+    }
+
+    // --- Two giant 80s hackers on the grid beside the road, side-on, typing like mad.
+    const hackers: Hacker[] = [];
+    const hackerAt = (d: number, side: number) => {
+      track.frameAt(d, f);
+      for (let lat = 70; lat < 220; lat += 12) {
+        const x = f.position.x + f.right.x * lat * side, z = f.position.z + f.right.z * lat * side;
+        if (track.distanceSqTo(x, z) < 60 * 60) continue;
+        const h = new Hacker();
+        h.group.scale.setScalar(16);
+        h.group.position.set(x, 0, z);
+        h.group.rotation.y = Math.atan2(-f.forward.z, f.forward.x); // facing along the direction of travel
+        scene.add(h.group);
+        hackers.push(h);
+        return;
+      }
+    };
+    hackerAt(520, -1);
+    hackerAt(1600, 1);
+    ctx.onUpdate((time, dt) => { worms[0].update(time, dt); worms[1].update(time * 1.3 + 40); for (const h of hackers) h.update(time); });
     return {};
   },
 };

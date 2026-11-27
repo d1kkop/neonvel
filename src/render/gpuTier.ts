@@ -36,8 +36,9 @@ export function detectGpu(): GpuInfo {
   const r = renderer.toLowerCase();
   const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8;
   const pick = (tier: GpuTier, reason: string): GpuInfo => {
-    // Little memory or a small texture limit caps it, whatever the GPU.
-    if (mem <= 4 && tier !== 'low') return { tier: 'low', renderer, reason: `${reason}, ${mem} GB memory` };
+    // Little memory lowers it one step (never straight to low): privacy browsers (Brave) report a made-up, often low
+    // navigator.deviceMemory, which used to put strong PCs on Low (0.75x resolution).
+    if (mem <= 4 && tier === 'high' && !/dedicated|arc/i.test(reason)) return { tier: 'medium', renderer, reason: `${reason}, ${mem} GB memory` };
     if (maxTex < 8192 && tier === 'high') return { tier: 'medium', renderer, reason: `${reason}, small texture limit` };
     return { tier, renderer, reason };
   };

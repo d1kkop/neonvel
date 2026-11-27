@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Rng } from '../util/random';
 import { designs } from '../world/billboardArt';
 import { createAsteroids, createPlanet, Placement } from '../world/props/LevelProps';
+import { createSpaceGiants } from '../world/props/SpaceGiants';
 import { MeteorStrike, ShootingStars, Ufo } from '../world/props/SpaceEvents';
 import { AlienCyclist, FloatingRoadster, RocketFlyby } from '../world/props/SpaceVisitors';
 import type { LevelDef } from './types';
@@ -44,21 +45,21 @@ export const orbitRun: LevelDef = {
   build(ctx) {
     const { track, scene } = ctx;
     const rng = new Rng(ctx.seed);
-    // A whole system: ringed gas giant with a cratered moon, an ice giant, an Earth-like world, a lava world,
+    // A whole system: ringed gas giant, an ice giant, a lava world,
     // a ringed ice moon and a few small rocky bodies, spread all around (and above / below) the track.
-    scene.add(createPlanet(new THREE.Vector3(2600, 500, -3200), 900, '#d89a5a', '#7a4a2a', true, 'gas', 0));
+    const orange = createPlanet(new THREE.Vector3(2600, 500, -3200), 900, '#d89a5a', '#7a4a2a', true, 'gas', 0);
+    scene.add(orange);
+    const giants = createSpaceGiants(scene);
     scene.add(createPlanet(new THREE.Vector3(1500, 1150, -2300), 150, '#b8b4ac', '#6a6660', false, 'rocky', 3.1));
-    scene.add(createPlanet(new THREE.Vector3(-2400, -300, 1800), 320, '#4a8ad8', '#e8f4ff', false, 'gas', 1));
-    scene.add(createPlanet(new THREE.Vector3(-3600, 700, -1600), 560, '#4a9aff', '#2a6ad8', false, 'terran', 5.7));
     scene.add(createPlanet(new THREE.Vector3(2000, -700, 3500), 260, '#ffb040', '#ff3010', false, 'lava', 8.2));
-    scene.add(createPlanet(new THREE.Vector3(-1300, 1500, -3700), 300, '#d8ecff', '#4a7ab8', true, 'ice', 2.4));
+    // (The ringed ice planet that stood here was inside the big banded giant: removed.)
     scene.add(createPlanet(new THREE.Vector3(600, 1300, 2600), 140, '#9a968e', '#5a5850', false, 'rocky', 6.6));
     scene.add(createPlanet(new THREE.Vector3(3700, -200, 1200), 90, '#c8a888', '#6a5040', false, 'rocky', 11.3));
     scene.add(createPlanet(new THREE.Vector3(-3000, -900, -300), 120, '#cfe4ff', '#5a8ac8', false, 'ice', 13.9));
 
     // Asteroid belt around (and below / above) the track.
     const rocks: Placement[] = [];
-    for (let i = 0; i < 900; i++) {
+    for (let i = 0; i < 450; i++) {
       const x = rng.range(-1100, 1900), z = rng.range(-1000, 1800);
       const d2 = track.distanceSqTo(x, z);
       const y = rng.range(-260, 220);
@@ -104,6 +105,8 @@ export const orbitRun: LevelDef = {
       }
     };
     ctx.onUpdate((time, dt) => {
+      giants(time, dt);
+      orange.rotation.y += 0.004 * dt;
       const pl = ctx.player();
       for (const v of visitors) v.update(time, dt, pl);
       clearBoards(visitors[0].group.position, 5);   // Roadster (with its arrow and name above it)

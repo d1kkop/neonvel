@@ -12,7 +12,8 @@ What it does:
     (the lamp atlas, front half / rear half, so they glow and the tail flares when braking or drifting);
     every other material is prefixed k_ (the game keeps it as authored: interior, underbody, plates...);
   * adds the empties head_L/R, tail_L/R, exhaust_L/R and cabin_skin (see-through glass);
-  * scales the textures down (1024 px, 512 for the light version) and exports a .glb with WebP images.
+  * keeps the textures at full size (2048 px; 1024 for the light version) and exports a .glb with WebP images
+    and MikkTSpace tangents (the baked paint normal maps only shade right with the tangents they were baked with).
 """
 import bpy, bmesh, sys, math
 from mathutils import Vector, Matrix
@@ -20,7 +21,7 @@ from mathutils import Vector, Matrix
 argv = sys.argv[sys.argv.index('--') + 1:]
 NAME, OUT = argv[0], argv[1]
 LO = len(argv) > 2 and argv[2] == 'lo'
-TEX = 512 if LO else 1024
+TEX = 1024 if LO else 2048
 
 src = bpy.data.objects[NAME]
 for o in list(bpy.data.objects):
@@ -204,5 +205,6 @@ print(f'IMPORT90 {NAME} tris={tris} wheels F r={wheels[(True, True)]["r"]:.3f} a
 
 bpy.ops.export_scene.gltf(
     filepath=OUT, export_format='GLB', export_yup=True, export_apply=True,
-    export_image_format='WEBP', export_materials='EXPORT', export_extras=False,
+    export_image_format='WEBP', export_image_quality=88, export_materials='EXPORT', export_extras=False,
+    export_tangents=True,
 )

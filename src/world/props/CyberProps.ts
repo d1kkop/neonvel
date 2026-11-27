@@ -225,7 +225,7 @@ export function createTrojanHorse(codeColor = '#3dff9e'): THREE.Group {
 
 // ------------------------------------------------------------------ virus worm
 
-const WORM_SEGMENTS = 34;
+const WORM_SEGMENTS = 52;
 
 /** One body segment: a squashed ball with a ring of spikes; vertex attribute aGlow marks the glowing parts. */
 function wormSegmentGeometry(): THREE.BufferGeometry {
@@ -234,11 +234,12 @@ function wormSegmentGeometry(): THREE.BufferGeometry {
     geo.setAttribute('aGlow', new THREE.Float32BufferAttribute(new Float32Array(geo.getAttribute('position').count).fill(glow), 1));
     return geo.index ? geo.toNonIndexed() : geo;
   };
-  parts.push(mark(new THREE.SphereGeometry(1, 20, 14).scale(1, 1, 0.8), 0));
-  parts.push(mark(new THREE.TorusGeometry(1.0, 0.09, 8, 28), 1)); // glowing band round the middle
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    const spike = new THREE.ConeGeometry(0.16, 0.9, 6).translate(0, 1.4, 0).rotateZ(a);
+  // Slightly long along the body (z) so neighbouring segments overlap into one continuous worm.
+  parts.push(mark(new THREE.SphereGeometry(1, 22, 14).scale(1, 1, 1.25), 0));
+  parts.push(mark(new THREE.TorusGeometry(1.0, 0.13, 8, 28), 1)); // glowing band round the middle
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const spike = new THREE.ConeGeometry(0.14, 0.7, 6).translate(0, 1.25, 0).rotateZ(a);
     parts.push(mark(spike, 1));
   }
   return mergeGeometries(parts)!;
@@ -289,8 +290,10 @@ export class VirusWorm {
         void main() {
           vec3 v = normalize(cameraPosition - vW);
           float rim = pow(clamp(1.0 - abs(dot(normalize(vN), v)), 0.0, 1.0), 2.2);
-          vec3 body = vec3(0.03, 0.0, 0.02) + uColor * (rim * 1.6 + 0.08);
-          vec3 glow = uColor * (2.4 + 1.6 * uBeatPulse);
+          // Lit body (not a dark silhouette): base colour, bright rim, and data pulses running down the worm.
+          float run = pow(0.5 + 0.5 * sin(dot(vW, vec3(0.09, 0.05, 0.07)) * 3.0 - uTime * 6.0), 6.0);
+          vec3 body = uColor * (0.32 + rim * 2.2 + run * 0.9);
+          vec3 glow = uColor * (3.0 + 1.6 * uBeatPulse) + vec3(0.4);
           gl_FragColor = vec4(mix(body, glow, vGlow), 1.0);
         }`,
     });
@@ -298,26 +301,36 @@ export class VirusWorm {
     this.body.frustumCulled = false;
     this.group.add(this.body);
     // Head: a bigger ball, two eyes, two mandibles that open and close.
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(1.25, 24, 16), new THREE.MeshBasicMaterial({ color: '#12020a' }));
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(1.35, 24, 16).scale(1, 0.9, 1.2), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(0.55) }));
     const rimMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2.6) });
     const crest = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.1, 8, 32), rimMat);
     this.head.add(skull, crest);
     for (const sx of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 10), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffe14d').multiplyScalar(4) }));
-      eye.position.set(sx * 0.55, 0.45, -1.0);
-      const jaw = new THREE.Mesh(new THREE.ConeGeometry(0.22, 1.6, 6).rotateX(-Math.PI / 2).translate(0, 0, -0.8), rimMat);
-      jaw.position.set(sx * 0.6, -0.3, -1.0);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.42, 14, 10), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffe14d').multiplyScalar(4) }));
+      eye.position.set(sx * 0.62, 0.5, -1.25);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), new THREE.MeshBasicMaterial({ color: '#000000' }));
+      pupil.position.set(sx * 0.66, 0.5, -1.62);
+      const jaw = new THREE.Mesh(new THREE.ConeGeometry(0.28, 2.0, 6).rotateX(-Math.PI / 2).translate(0, 0, -1.0), rimMat);
+      jaw.position.set(sx * 0.7, -0.35, -1.2);
+      this.head.add(pupil);
       this.jaws.push(jaw);
       this.head.add(eye, jaw);
     }
     this.head.scale.setScalar(size);
     this.group.add(this.head);
-    this.tag = label('WORM.EXE', color, size * 1.5);
+    this.tag = label('WORM.EXE', color, size * 2.2);
     this.group.add(this.tag);
   }
 
+  /**
+   * Optional: fly along the road instead of the loop. `at(s, out)` gives the point to fly through at track
+   * distance s (m); `headS(time, dt)` says where the head is now. The path parameter is then metres along the road.
+   */
+  follow: { at: (s: number, out: THREE.Vector3) => THREE.Vector3; headS: (time: number, dt: number) => number } | null = null;
+
   /** Point on the worm's path at parameter u (radians); a closed, knotted loop that also bobs up and down. */
   private path(u: number, out: THREE.Vector3): THREE.Vector3 {
+    if (this.follow) return this.follow.at(u, out);
     const R = this.radius;
     return out.set(
       this.center.x + R * Math.sin(u) + R * 0.35 * Math.sin(u * 3 + 0.8),
@@ -326,13 +339,14 @@ export class VirusWorm {
     );
   }
 
-  update(time: number): void {
+  update(time: number, dt = 0): void {
     const speed = 0.055; // radians of the loop per second
-    const u0 = time * speed;
-    const gap = (this.size * 1.45) / (this.radius * 1.15); // path parameter between segments (their spacing in m / path scale)
+    const u0 = this.follow ? this.follow.headS(time, dt) : time * speed;
+    const gap = this.follow ? this.size * 1.05 : (this.size * 1.05) / (this.radius * 1.15); // path parameter between segments
+    const du = this.follow ? 1 : 0.004;
     const place = (u: number, scale: number, out: THREE.Matrix4, roll: number) => {
       this.path(u, this.p);
-      this.path(u + 0.004, this.p2);
+      this.path(u + du, this.p2);
       // Segments ripple sideways like a crawling worm.
       this.look.lookAt(this.p, this.p2, THREE.Object3D.DEFAULT_UP);
       this.q.setFromRotationMatrix(this.look);
@@ -343,7 +357,7 @@ export class VirusWorm {
     for (let i = 0; i < WORM_SEGMENTS; i++) {
       const t = i / (WORM_SEGMENTS - 1);
       // Fat in the first third, tapering to the tail; a pulse of thickness runs down the body.
-      const girth = (0.55 + 0.45 * Math.sin(Math.PI * Math.min(1, 0.25 + t * 0.9))) * (1 - 0.45 * t * t);
+      const girth = (0.7 + 0.3 * Math.sin(Math.PI * Math.min(1, 0.25 + t * 0.9))) * (1 - 0.55 * t * t);
       const pulse = 1 + 0.12 * Math.sin(time * 5 - i * 0.7);
       this.body.setMatrixAt(i, place(u0 - (i + 1) * gap, this.size * girth * pulse, this.m, i * 0.4 + time * 0.6));
     }
@@ -356,5 +370,84 @@ export class VirusWorm {
     this.jaws[0].rotation.y = -bite;
     this.jaws[1].rotation.y = bite;
     this.tag.position.copy(this.p).setY(this.p.y + this.size * 2.6);
+  }
+}
+
+// ------------------------------------------------------------------ hacker
+
+/**
+ * An 80s hacker as a neon wireframe: shades, mullet, hunched over a CRT computer, typing like mad; "ACCESS
+ * GRANTED" blinks above him. About 2.6 m tall at scale 1, seen side-on (he faces +X). Call update(time).
+ */
+export class Hacker {
+  readonly group = new THREE.Group();
+  private readonly arms: THREE.Group[] = [];
+  private readonly head = new THREE.Group();
+  private readonly granted: THREE.Sprite;
+
+  constructor() {
+    const g = this.group;
+    g.name = 'hacker';
+    const CY = '#00e5ff', PK = '#ff2bd6', YE = '#ffe14d';
+    const box = (parent: THREE.Object3D, w: number, h: number, d: number, x: number, y: number, z: number, color: string, rz = 0) => {
+      const b = neonSolid(new THREE.BoxGeometry(w, h, d), color);
+      b.position.set(x, y, z);
+      b.rotation.z = rz;
+      parent.add(b);
+      return b;
+    };
+    // Desk, chair, computer.
+    box(g, 1.7, 0.08, 2.0, 1.15, 1.4, 0, PK);
+    for (const [x, z] of [[0.4, 0.9], [1.9, 0.9], [0.4, -0.9], [1.9, -0.9]] as const) box(g, 0.08, 1.36, 0.08, x, 0.68, z, PK);
+    box(g, 0.9, 0.12, 0.9, -0.25, 0.9, 0, CY);
+    box(g, 0.12, 1.1, 0.9, -0.72, 1.5, 0, CY, 0.08);
+    box(g, 0.1, 0.85, 0.1, -0.25, 0.45, 0, CY);
+    box(g, 1.0, 0.85, 1.0, 1.55, 1.9, 0, YE);           // CRT body
+    box(g, 0.5, 0.6, 0.7, 2.25, 1.85, 0, YE);            // its back
+    box(g, 0.32, 0.05, 0.95, 0.72, 1.47, 0, YE);         // keyboard
+    const screen = createCodePanels([{ x: 1.04, y: 1.92, z: 0, w: 0.8, h: 0.62, yaw: -Math.PI / 2, glyph: 0.07, color: new THREE.Color('#3dff9e').multiplyScalar(2) }]);
+    g.add(screen);
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.62), new THREE.MeshBasicMaterial({ color: new THREE.Color('#3dff9e').multiplyScalar(0.35), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+    glow.position.set(1.035, 1.92, 0);
+    glow.rotation.y = -Math.PI / 2;
+    g.add(glow);
+    // Body: hunched torso, legs under the desk.
+    box(g, 0.45, 0.85, 0.7, -0.2, 1.42, 0, CY, -0.22);
+    for (const z of [-0.18, 0.18]) {
+      box(g, 0.8, 0.22, 0.24, 0.15, 1.05, z, CY);
+      box(g, 0.2, 0.85, 0.2, 0.52, 0.55, z, CY);
+      box(g, 0.34, 0.1, 0.22, 0.62, 0.08, z, PK);
+    }
+    // Head: face, shades, flat top and the mullet.
+    this.head.position.set(0.02, 2.08, 0);
+    g.add(this.head);
+    box(this.head, 0.38, 0.44, 0.36, 0, 0, 0, CY);
+    box(this.head, 0.44, 0.12, 0.4, -0.02, 0.27, 0, PK);
+    box(this.head, 0.18, 0.55, 0.38, -0.24, -0.12, 0, PK);
+    const shades = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.11, 0.44), new THREE.MeshBasicMaterial({ color: new THREE.Color(PK).multiplyScalar(3) }));
+    shades.position.set(0.2, 0.06, 0);
+    this.head.add(shades);
+    // Arms: shoulder pivots, forearms down onto the keyboard; they hammer the keys in update().
+    for (const z of [-0.36, 0.36]) {
+      const arm = new THREE.Group();
+      arm.position.set(-0.08, 1.78, z);
+      box(arm, 0.55, 0.13, 0.13, 0.27, 0, 0, CY);
+      box(arm, 0.5, 0.12, 0.12, 0.72, -0.12, -Math.sign(z) * 0.1, CY, -0.5);
+      g.add(arm);
+      this.arms.push(arm);
+    }
+    const tag = label('HACKER.EXE', CY, 0.5);
+    tag.position.set(0.6, 3.2, 0);
+    g.add(tag);
+    this.granted = label('ACCESS GRANTED', '#3dff9e', 0.42);
+    this.granted.position.set(0.6, 2.72, 0);
+    g.add(this.granted);
+  }
+
+  update(time: number): void {
+    this.arms.forEach((a, i) => { a.rotation.z = -0.35 + 0.12 * Math.abs(Math.sin(time * 14 + i * 1.7)); });
+    this.head.rotation.z = -0.1 + 0.05 * Math.sin(time * 7);
+    this.head.position.y = 2.08 + 0.02 * Math.abs(Math.sin(time * 7));
+    this.granted.visible = Math.floor(time * 2.5) % 3 !== 0;
   }
 }

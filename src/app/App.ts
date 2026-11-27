@@ -47,7 +47,9 @@ interface OnlineRace {
 /** Top-level game: menus ↔ races, owns renderer, audio, input and the current World. */
 export class App {
   private readonly settings: Settings = loadSettings();
-  private readonly camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 7000);
+  // Near plane 0.3 m (was 0.1): three times the depth precision far away, so close-together surfaces on distant
+  // buildings (facade screens, window bands) no longer flicker; the nearest camera is metres from the car.
+  private readonly camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.3, 7000);
   private readonly renderer: Renderer;
   private readonly audio = new AudioEngine();
   private readonly input = new Input();
@@ -94,9 +96,14 @@ export class App {
 
     this.menu = new Menu(this.settings, {
       startRace: () => this.startRace(),
-      findMatch: () => void this.findMatch(),
-      cancelMatch: () => this.cancelMatch(),
-      matchWaitChanged: () => this.matchWaitChanged(),
+      netOpen: () => void this.netOpen(),
+      netHost: (o) => this.net.send({ t: 'host', ...o, car: this.lobbyCar() }),
+      netJoin: (id) => this.net.send({ t: 'join', id, car: this.lobbyCar() }),
+      netCarChanged: () => this.net.send({ t: 'lcar', car: this.lobbyCar() }),
+      netReady: (ready) => this.net.send({ t: 'lready', ready }),
+      netSet: (o) => this.net.send({ t: 'lset', ...o }),
+      netStart: () => this.net.send({ t: 'lstart' }),
+      netLeave: () => { if (this.inLobby) this.net.send({ t: 'lleave' }); },
       refreshLeaderboard: () => void this.refreshLeaderboard(),
       lapBoard: (level) => this.store.lapBoard(level, this.settings.authToken),
       signIn: (provider, devName) => this.store.signIn(provider, devName),
@@ -104,7 +111,7 @@ export class App {
       rename: (name) => this.rename(name),
       providers: () => this.store.providers(),
       resume: () => this.resume(),
-      restart: () => (this.online || this.lastWasOnline ? void this.findMatch(true) : this.startRace()),
+      restart: () => (this.online || this.lastWasOnline ? this.backToLobby() : this.startRace()),
       quitToMenu: () => this.toMenu(),
       mainShown: () => {
         // The main menu always shows the first level (and its theme tune), whatever was previewed.
@@ -311,7 +318,7 @@ export class App {
     this.mode = null;
     const weather = title ? level.defaultWeather : this.raceWeather(level);
     this.menuWeather = `${weather}|${!title && this.raceFog(level)}`;
-    const w = this.buildWorld(level, weather, 3);
+    const w = this.buildWorld(level, weather, 9); // attract mode: always a pack of 10 cars
     if (!title) w.weather.setFog(this.raceFog(level), true);
     // Attract mode: the AI drives every car (including yours); give them a rolling start.
     for (const c of w.cars) {
@@ -415,11 +422,12 @@ export class App {
     }, 60);
   }
 
-  private toMenu(): void {
+  private toMenu(keepLobby = false): void {
     if (this.online) {
       this.net.send({ t: 'leave' });
       this.online = null;
     }
+    if (!keepLobby && this.inLobby) this.net.send({ t: 'lleave' });
     this.paused = false;
     this.menu.hide();
     this.loadMenuWorld(levelById(MENU_LEVEL), true);
@@ -466,7 +474,19 @@ export class App {
     if (!w || this.paused || this.state === 'loading') return;
 
     if (this.state === 'menu') {
-      w.step(dt, null);
+      // The demo car behind the menus stands still while Options is open.
+      if (this.menu.current !== 'options') {
+        w.step(dt, null);
+        // Keep the attract-mode pack together round the followed car, so all 10 stay in view.
+        const lead = w.cars[0], L = w.track.length;
+        for (let i = 1; i < w.cars.length; i++) {
+          const p = w.cars[i].phys;
+          let d = (p.s - lead.phys.s) % L;
+          if (d > L / 2) d -= L; else if (d < -L / 2) d += L;
+          if (d > 45) p.v *= 1 - Math.min(0.6, (d - 45) * 0.01) * dt;
+          else if (d < -45) p.v *= 1 + Math.min(0.6, (-d - 45) * 0.01) * dt;
+        }
+      }
       return;
     }
     if (this.state === 'netwait') {
@@ -731,7 +751,7 @@ export class App {
     this.hud.setBeat(bd?.pulse ?? 0, !!bd && bd.dist <= App.BEAT_WINDOW);
     w.update(this.paused ? 0 : dt, this.camera, covered);
     this.vhsTime += dt;
-    this.renderer.setVhs(this.settings.vhs === true ? 1 : 0, 0, this.vhsTime);
+    this.renderer.setVhs(this.settings.vhs === true ? 0.5 : 0, 0, this.vhsTime); // half strength: the full look was too much
 
     if (this.state === 'racing' || this.state === 'finished' || this.state === 'countdown') {
       const L = w.track.length;
@@ -766,9 +786,22 @@ export class App {
     if (this.state === 'racing' || this.state === 'countdown' || this.state === 'finished') this.renderMirror(w);
     // Dynamic resolution, from the real time between frames (only while racing: menus and loading don't count).
     const nowMs = performance.now();
-    if (this.state === 'racing' && !this.paused && this.lastFrameMs) this.renderer.adaptResolution(nowMs - this.lastFrameMs);
+    if (this.state === 'racing' && !this.paused && this.lastFrameMs && !this.settings.resScale) this.renderer.adaptResolution(nowMs - this.lastFrameMs);
     this.lastFrameMs = nowMs;
+    // FPS + real render resolution, bottom-right corner (refreshed twice a second).
+    this.perfFrames++;
+    if (nowMs - this.perfSince >= 500) {
+      const fps = (this.perfFrames * 1000) / (nowMs - this.perfSince);
+      const r = this.renderer.webgl.getPixelRatio(), max = this.renderer.maxPixelRatio;
+      const c = this.renderer.webgl.domElement;
+      const pct = Math.round((r / (window.devicePixelRatio || 1)) * 100);
+      this.hud.setPerf(`${Math.round(fps)} fps   ${c.width}×${c.height}   ${pct}%${this.settings.resScale ? ' fixed' : r < max - 0.01 ? ' auto' : ''}`);
+      this.perfFrames = 0;
+      this.perfSince = nowMs;
+    }
   }
+  private perfFrames = 0;
+  private perfSince = 0;
 
   private coverBlend = 0;
   private lastFrameMs = 0;
@@ -842,8 +875,10 @@ export class App {
     // High supersamples (at least 1.5x, up to 2x) so fine shader detail stays crisp instead of shimmering.
     // Phones start at 1x and may climb to their sharp native-ish resolution while they keep 60 fps (the dynamic
     // resolution steps back down when the frame rate drops). Weak desktop GPUs start low.
-    const ratio = isMobile ? Math.min(dpr, q === 'high' ? 1.5 : 1) : q === 'low' ? Math.min(dpr, 1) * 0.75 : q === 'medium' ? Math.min(dpr, 1.25) : Math.min(Math.max(dpr, 1.5), 2);
-    const maxRatio = isMobile ? dpr : ratio; // phones may go up to their full native resolution
+    let ratio = isMobile ? Math.min(dpr, q === 'high' ? 1.5 : 1) : q === 'low' ? Math.min(dpr, 1) * 0.75 : q === 'medium' ? Math.min(dpr, 1.25) : Math.min(Math.max(dpr, 1.5), 2);
+    let maxRatio = isMobile ? dpr : ratio; // phones may go up to their full native resolution
+    // Forced resolution (Options › Resolution): a fixed share of the screen's real pixels, no dynamic changes.
+    if (this.settings.resScale) ratio = maxRatio = dpr * this.settings.resScale;
     // Dynamic resolution: weak hardware may go well below 1x to hold the frame rate.
     this.renderer.setRatioRange(q === 'low' ? 0.5 : q === 'medium' ? 0.7 : 1, maxRatio);
     // Phones: as sharp as possible while the game stays above 30 fps.
@@ -1135,7 +1170,8 @@ export class App {
           id: p.id,
           name: p.id === m.you ? 'YOU' : p.name,
           local: p.id === m.you,
-          setup: p.id === m.you ? this.playerCarSetup() : { style: model.style, paint: p.car.paint || model.paint, accent: model.accent, spec: specFor(model), tier: model.tier },
+          // Everybody (you too) races the car and paint chosen in the lobby.
+          setup: { style: model.style, paint: p.car.paint || model.paint, accent: model.accent, name: model.name, spec: specFor(model), tier: model.tier },
         };
       });
       const serverWeather = (m.weather as WeatherName) ?? 'clear';
@@ -1214,49 +1250,41 @@ export class App {
       saveSettings(this.settings);
       this.menu.updateRating();
     }
+    this.net.send({ t: 'lback' });
     const won = m.order[0] === o.you;
     this.audio.ui?.fanfare(won);
     this.hud.show(false);
     this.audio.setEngine(false);
     this.state = 'finished';
-    this.menu.showResults(rows, extra, 'Find Next Match');
+    this.menu.showResults(rows, extra, 'Back to Lobby');
     this.updateNowPlaying();
   }
 
-  private async findMatch(fromResults = false): Promise<void> {
-    if (fromResults) {
-      this.toMenu();
-      this.menu.show('netplay');
-    }
-    this.menu.setNetStatus('Connecting to server…', true);
-    if (!(await this.ensureOnline())) {
-      this.menu.setNetStatus('Game server offline — try again in a moment.');
-      return;
-    }
-    const carId = this.isOwned(this.settings.carId) ? this.settings.carId : 'vortex';
-    this.net.send({ t: 'queue', wait: this.settings.matchWait ?? 30, car: { id: carId, paint: this.settings.carPaint[carId] ?? '' } });
-    this.searching = true;
-    this.menu.setNetStatus('Searching for drivers near your rating…', true);
+  /** In a netplay lobby right now (leaving it is sent to the server). */
+  private inLobby = false;
+
+  /** Your car with its resolved paint: always a hex colour, never empty. */
+  private lobbyCar(): { id: string; paint: string } {
+    const id = this.isOwned(this.settings.carId) ? this.settings.carId : 'vortex';
+    return { id, paint: this.settings.carPaint[id] ?? carById(id).paint };
   }
 
-  /** Searching for a match right now (a changed wait time is sent straight away). */
-  private searching = false;
-
-  private matchWaitChanged(): void {
-    if (!this.searching || !this.net.connected) return;
-    const carId = this.isOwned(this.settings.carId) ? this.settings.carId : 'vortex';
-    this.net.send({ t: 'queue', wait: this.settings.matchWait ?? 30, car: { id: carId, paint: this.settings.carPaint[carId] ?? '' } });
+  /** Netplay screen opened: connect and sign in; the server then pushes the lobby list. */
+  private async netOpen(): Promise<void> {
+    if (!this.settings.authToken) { this.menu.setNetStatus('Sign in with Google or Discord first.'); return; }
+    this.menu.setNetStatus('Connecting to server…');
+    if (!(await this.ensureOnline())) this.menu.setNetStatus('Game server offline — try again in a moment.');
   }
 
-  private cancelMatch(): void {
-    this.searching = false;
-    if (this.net.connected) this.net.send({ t: 'cancel' });
-    this.menu.setNetStatus('Matchmaking cancelled.');
+  /** Results screen: back to the lobby you raced in. */
+  private backToLobby(): void {
+    this.toMenu(true);
+    this.menu.show('netplay');
   }
 
   /** Leaderboard over plain HTTP: works without a driver name or a socket connection. */
   private async refreshLeaderboard(): Promise<void> {
-    const rows = await this.store.leaderboard();
+    const rows = await this.store.leaderboard(this.settings.authToken);
     if (!rows) this.menu.setLeaderboard(null, 'Leaderboard offline — start the server ("npm run server").');
     else this.menu.setLeaderboard(NetClient.toRows(rows, this.settings.playerName));
   }
@@ -1270,27 +1298,16 @@ export class App {
         this.settings.games = m.games;
         saveSettings(this.settings);
         this.menu.updateRating();
+        this.menu.setNetUser(m.id, m.name);
         break;
-      case 'queued':
-        if (m.found === undefined || m.wait === undefined || m.waited === undefined) {
-          this.menu.setNetStatus(`In queue (${m.size} searching) · matching within ±${m.range} rating…`, true);
-          break;
-        }
-        {
-          const max = m.max ?? 4;
-          const left = Math.max(0, m.wait - m.waited);
-          const plan = left > 0
-            ? `Looking for a full race of ${max} drivers. In ${left} s the race starts with the drivers found so far (minimum 2).`
-            : m.found > 1
-              ? `Wait time is up: starting with ${m.found} drivers as soon as they are ready too…`
-              : `Wait time is up, but nobody is online near your rating yet. Still searching — the first driver who joins races you.`;
-          this.menu.setNetStatus(`Searching… ${m.found}/${max} drivers found · ${m.waited} s / ${m.wait} s · rating range ±${m.range}
-${plan}`, true);
-        }
+      case 'lobbies':
+        this.menu.setLobbies(m.lobbies, m.online);
+        break;
+      case 'lobby':
+        this.inLobby = !!m.lobby;
+        this.menu.setLobby(m.lobby);
         break;
       case 'match':
-        this.searching = false;
-        this.menu.setNetStatus(`Match found: ${m.players.map((p) => `${p.name} (${p.rating})`).join(' vs ')}`);
         this.startOnline(m);
         break;
       case 'go':

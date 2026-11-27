@@ -18,16 +18,21 @@ fs.mkdirSync(TMP, { recursive: true });
 fs.mkdirSync(OUT, { recursive: true });
 const env = { ...process.env, TEMP: TMP, TMP };
 
-/** Game body style → the car's object name in the pack. */
-const CARS = { asti: 'Asti', phoenix: 'Phoenix', gallo: 'Gallo_99', duke: 'Duke_69', duntov: 'Duntov', cheetah: 'Cheetah', nfr: 'NFR' };
+/** Game body style → the car's object name in the pack (or [object, .blend] for cars from elsewhere). */
+const CARS = {
+  asti: 'Asti', phoenix: 'Phoenix', gallo: 'Gallo_99', duke: 'Duke_69', duntov: 'Duntov', cheetah: 'Cheetah', nfr: 'NFR',
+  // Classic Vehicle Set (Fab, Unreal-only): tools/unreal/export_classic.py, then tools/blender/prep_classic.py.
+  classic: ['Classic', path.join(root, 'assets-src/classicvehicle/classic.blend')],
+};
 
 const wanted = process.argv.slice(2);
-for (const [style, object] of Object.entries(CARS)) {
+for (const [style, entry] of Object.entries(CARS)) {
+  const [object, blend] = Array.isArray(entry) ? entry : [entry, BLEND];
   if (wanted.length && !wanted.includes(style)) continue;
   for (const lo of [false, true]) {
     const raw = path.join(TMP, `${style}${lo ? '_lo' : ''}.raw.glb`);
     const out = path.join(OUT, `${style}${lo ? '_lo' : ''}.glb`);
-    const log = execFileSync(BLENDER, ['--background', BLEND, '--python', SCRIPT, '--', object, raw, ...(lo ? ['lo'] : [])], { env, stdio: 'pipe' }).toString();
+    const log = execFileSync(BLENDER, ['--background', blend, '--python', SCRIPT, '--', object, raw, ...(lo ? ['lo'] : [])], { env, stdio: 'pipe' }).toString();
     const info = /IMPORT90 .*/.exec(log)?.[0] ?? '(no report)';
     // -cc: meshopt compression, quantised attributes; -kn/-km: keep node + material names (the game maps them by name).
     execFileSync(GLTFPACK, ['-i', raw, '-o', out, '-cc', '-kn', '-km', '-vn', '12'], { env, stdio: 'pipe', shell: true });

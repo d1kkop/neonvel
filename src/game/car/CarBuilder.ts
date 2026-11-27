@@ -235,6 +235,7 @@ export const CAR_STYLES: Record<string, CarStyle> = {
   duntov: modelStyle('duntov', 5.02, 2.01, 0.35, [0.18, 0.8]),
   cheetah: modelStyle('cheetah', 5.03, 2.14, 0.35, [0.18, 0.8]),
   nfr: modelStyle('nfr', 4.9, 2.18, 0.35, [0.18, 0.8]),
+  classic: modelStyle('classic', 4.44, 1.81, 0.36, [0.2, 0.8]),
 };
 
 export interface CarOptions {
@@ -1000,7 +1001,13 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
     ['wheel_F', 'wheel_R'].forEach((n, wi) => {
       const node = model.getObjectByName(n);
       if (!node) return;
-      const box = new THREE.Box3().setFromObject(node);
+      // Measure the tyre only (the wheel node may also hold brake / suspension bits that would shift its centre).
+      const box = new THREE.Box3();
+      node.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh && (Array.isArray(m.material) ? m.material : [m.material]).some((x) => /tire|tyre/i.test(x.name))) box.expandByObject(m);
+      });
+      if (box.isEmpty()) box.setFromObject(node);
       const c = box.getCenter(new THREE.Vector3());
       const g = new THREE.Group();
       node.traverse((o) => {
@@ -1533,6 +1540,12 @@ export function buildCar(opts: CarOptions = {}): BuiltCar {
           pm.normalMap = src.normalMap ?? src.clearcoatNormalMap;
           pm.clearcoatNormalMap = src.clearcoatNormalMap ?? null;
           if (src.normalScale) pm.normalScale.copy(src.normalScale);
+          // Game-ready bodies have few triangles: a mirror finish showed every facet as a wobble in the
+          // reflections. A softer, less metallic paint (closer to the pack's own look) keeps the shine but not the waves.
+          pm.metalness *= 0.5;
+          pm.roughness = Math.max(0.34, pm.roughness * 1.4);
+          pm.clearcoatRoughness = Math.max(0.12, pm.clearcoatRoughness * 1.8);
+          pm.envMapIntensity = 1.0;
           modelPaint = pm;
         }
         return modelPaint;

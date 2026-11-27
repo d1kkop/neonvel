@@ -276,7 +276,7 @@ export class City {
     const sh = sw / 2;
     const y = this.track.height + rng.range(4, Math.max(5, faceH - this.track.height - sh - 4));
     if (y + sh > faceH) return;
-    this.faceSpots.push({ pos: new THREE.Vector3(x + best.n.x * (best.half + 0.5), y, z + best.n.z * (best.half + 0.5)), normal: best.n, w: sw, h: sh });
+    this.faceSpots.push({ pos: new THREE.Vector3(x + best.n.x * (best.half + 3), y, z + best.n.z * (best.half + 3)), normal: best.n, w: sw, h: sh });
   }
 
   // --- Mesh building

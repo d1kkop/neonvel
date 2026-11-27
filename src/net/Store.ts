@@ -69,9 +69,9 @@ export class Store {
     }
   }
 
-  async leaderboard(): Promise<{ name: string; rating: number; games: number }[] | null> {
+  async leaderboard(token = ''): Promise<{ name: string; rating: number; games: number; rank?: number }[] | null> {
     try {
-      const r = await fetch(`${this.base}/leaderboard`, { signal: AbortSignal.timeout(2500) });
+      const r = await fetch(`${this.base}/leaderboard${token ? `?token=${encodeURIComponent(token)}` : ''}`, { signal: AbortSignal.timeout(2500) });
       return (await r.json()) as { name: string; rating: number; games: number }[];
     } catch {
       return null;

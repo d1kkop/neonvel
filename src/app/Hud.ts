@@ -48,6 +48,7 @@ export class Hud {
         <div class="hud-laptime"><span class="hud-small">LAP</span> <span data-laptime>0:00.00</span></div>
         <div class="hud-laptime"><span class="hud-small">BEST</span> <span data-best>—</span></div></div>
       <div class="hud-tr"><div data-posbox><div class="hud-small">POS</div><div class="hud-big" data-pos>1/4</div></div><div class="hud-mode" data-mode></div></div>
+      <div class="hud-fps" data-fps></div>
       <div class="hud-speed"><span class="v" data-speed>0</span><span class="u">KM/H</span><div class="hud-bar" data-bar></div></div>
       <div class="speedlines" data-lines></div>
       <div class="beat-pop" data-beatpop></div>
@@ -188,6 +189,12 @@ export class Hud {
 
   show(on: boolean): void {
     this.el.classList.toggle('active', on);
+  }
+
+  /** Frame rate and the real render resolution (one small line in the bottom-right corner). */
+  setPerf(text: string): void {
+    const el = this.el.querySelector<HTMLElement>('[data-fps]');
+    if (el && el.textContent !== text) el.textContent = text;
   }
 
   update(d: { lap: number; laps: number; pos: number; total: number; time: number; kmh: number; speed01: number; boost?: number; boosting?: boolean; dt?: number; lapTime?: number; best?: number }): void {
