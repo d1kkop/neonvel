@@ -56,6 +56,8 @@ export interface CarSpec {
   maxSteer: number; // rad at standstill
   halfWidth: number;
   length: number;
+  /** Air drag factor (v² term); low = a slippery hypercar that keeps pulling to a higher top speed. */
+  drag?: number;
 }
 
 export const DEFAULT_SPEC: CarSpec = {
@@ -130,7 +132,7 @@ export function stepPhys(c: CarPhys, inp: InputState & { handbrake?: number; boo
   const engine = throttle * spec.accel * (c.boosting ? BOOST.power : 1) * Math.max(0.12, powerK * (1.25 - 0.25 * powerK)) * Math.max(0.15, 1 - speed01 * speed01 * speed01);
   // While drifting the brakes bite less (the slide keeps its speed), but enough to scrub speed off when you need to.
   const braking = inp.brake * spec.brake * (c.v > 0.5 ? 1 : 0) * (1 - 0.3 * c.drift);
-  const drag = 0.0006 * c.v * c.v + 0.15;
+  const drag = (spec.drag ?? 0.0006) * c.v * c.v + 0.15;
   c.v += (engine - braking - drag) * dt;
   // Reverse-ish: brake at standstill backs up slowly.
   if (c.v < 0.5 && inp.brake > 0.5 && inp.throttle < 0.1) c.v = Math.max(-6, c.v - 4 * dt);

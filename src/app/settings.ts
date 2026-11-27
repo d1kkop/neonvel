@@ -10,6 +10,8 @@ export interface Settings {
   qualityAuto?: boolean;
   /** Forced render resolution as a fraction of the screen's real pixels (1 = native); unset = automatic (dynamic). */
   resScale?: number;
+  /** Car models: auto = full detail unless graphics are low; full / light = every car. */
+  carDetail?: 'auto' | 'full' | 'light';
   /** Phone / tablet controls: on-screen ◀ ▶ buttons, steering stick, or tilt; autoGas = always on the throttle unless braking. */
   touchControls?: 'buttons' | 'stick' | 'tilt';
   autoGas?: boolean;
@@ -46,7 +48,7 @@ export interface Settings {
   difficulty: AiDifficulty;
   /** Netplay: seconds to wait for a full 4-driver lobby before racing with fewer. */
   matchWait: 15 | 30 | 45;
-  /** Session token from signing in with Google / Discord (empty = signed out). */
+  /** Session token from signing in with Google (empty = signed out). */
   authToken: string;
   /** Local cache of the online profile (server is authoritative). */
   rating: number;

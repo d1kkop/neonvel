@@ -37,11 +37,11 @@ export interface MenuHandlers {
   refreshLeaderboard(): void;
   /** A track's fastest-lap board (null = server offline). */
   lapBoard(level: string): Promise<LapBoard | null>;
-  signIn(provider: 'google' | 'discord' | 'dev', devName?: string): void;
+  signIn(provider: 'google' | 'dev', devName?: string): void;
   signOut(): void;
   /** Change the display name; returns an error message or null. */
   rename(name: string): Promise<string | null>;
-  providers(): Promise<{ google: boolean; discord: boolean; dev: boolean } | null>;
+  providers(): Promise<{ google: boolean; dev: boolean } | null>;
   resume(): void;
   restart(): void;
   quitToMenu(): void;
@@ -664,8 +664,12 @@ export class Menu {
   private renderAccount(): void {
     for (const screen of (['netplay', 'options'] as const)) {
       const box = this.screens.get(screen)?.querySelector<HTMLElement>('[data-account]');
-      if (box && screen === 'netplay' && this.s.authToken) box.innerHTML = '';
-      else if (box) this.renderAccountInto(box);
+      if (box && screen === 'netplay' && this.s.authToken) {
+        // Signed in: just who you are and a way out (the name is edited in Options).
+        box.innerHTML = `<div class="row" style="justify-content:flex-end;gap:10px"><span class="note">Signed in as ${esc(this.s.playerName)}</span>
+          <button class="chip" data-act="signout">Sign out</button></div>`;
+        box.querySelector('[data-act=signout]')!.addEventListener('click', () => { this.h.sound('back'); this.h.signOut(); });
+      } else if (box) this.renderAccountInto(box);
     }
   }
 
@@ -691,18 +695,18 @@ export class Menu {
       if (!slot) return;
       if (!p) { slot.textContent = 'Game server offline.'; return; }
       const btn = (k: string, label: string) => `<button class="btn small signin ${k}" data-provider="${k}">${label}</button>`;
-      // Google and Discord are always shown; until their app keys are on the server, clicking one explains that.
-      slot.outerHTML = `<span style="display:flex;gap:8px;flex-wrap:wrap">${btn('google', 'Sign in with Google')}${btn('discord', 'Sign in with Discord')}${p.dev ? `<input type="text" maxlength="16" placeholder="test name" data-devname style="width:110px">${btn('dev', 'Dev sign-in')}` : ''}</span><span class="note" data-signmsg></span>`;
+      // Google is always shown; until its app keys are on the server, clicking it explains that.
+      slot.outerHTML = `<span style="display:flex;gap:8px;flex-wrap:wrap">${btn('google', 'Sign in with Google')}${p.dev ? `<input type="text" maxlength="16" placeholder="test name" data-devname style="width:110px">${btn('dev', 'Dev sign-in')}` : ''}</span><span class="note" data-signmsg></span>`;
       box.querySelectorAll<HTMLElement>('[data-provider]').forEach((b) => b.addEventListener('click', () => {
-        const k = b.dataset.provider as 'google' | 'discord' | 'dev';
-        if ((k === 'google' || k === 'discord') && !p[k]) {
+        const k = b.dataset.provider as 'google' | 'dev';
+        if (k === 'google' && !p.google) {
           this.h.sound('back');
-          box.querySelector('[data-signmsg]')!.textContent = `${k === 'google' ? 'Google' : 'Discord'} sign-in is not switched on for this server yet (its app keys still have to be added).`;
+          box.querySelector('[data-signmsg]')!.textContent = `Google sign-in is not switched on for this server yet (its app keys still have to be added).`;
           return;
         }
         this.h.sound('select');
         const dev = box.querySelector<HTMLInputElement>('[data-devname]')?.value.trim() || 'Tester';
-        this.h.signIn(b.dataset.provider as 'google' | 'discord' | 'dev', dev);
+        this.h.signIn(b.dataset.provider as 'google' | 'dev', dev);
       }));
     });
   }
@@ -772,6 +776,8 @@ export class Menu {
         <div class="row"><span class="label">Graphics</span>
           <button class="chip ${s.qualityAuto !== false ? 'on' : ''}" data-q="auto">Auto</button>
           ${(['low', 'medium', 'high'] as const).map((q) => `<button class="chip ${s.qualityAuto === false && q === s.quality ? 'on' : ''}" data-q="${q}">${q}</button>`).join('')}</div>
+        <div class="row"><span class="label">Car detail</span>
+          ${([['auto', 'Auto'], ['full', 'Full'], ['light', 'Light']] as const).map(([k, l]) => `<button class="chip ${(s.carDetail ?? 'auto') === k ? 'on' : ''}" data-cardetail="${k}">${l}</button>`).join('')}</div>
         <div class="row"><span class="label">Resolution</span>
           <button class="chip ${!s.resScale ? 'on' : ''}" data-res="auto">Auto</button>
           ${[0.5, 0.75, 1, 1.5, 2].map((k) => `<button class="chip ${s.resScale === k ? 'on' : ''}" data-res="${k}">${k * 100}%</button>`).join('')}</div>
@@ -853,6 +859,10 @@ export class Menu {
       s.autoGas = s.autoGas === false;
       this.commit(); this.h.sound('select'); this.h.settingsChanged(); this.renderOptions();
     });
+    el.querySelectorAll<HTMLElement>('[data-cardetail]').forEach((c) => c.addEventListener('click', () => {
+      s.carDetail = c.dataset.cardetail as Settings['carDetail'];
+      this.commit(); this.h.sound('select'); this.h.settingsChanged(); this.renderOptions();
+    }));
     el.querySelectorAll<HTMLElement>('[data-res]').forEach((c) => c.addEventListener('click', () => {
       s.resScale = c.dataset.res === 'auto' ? undefined : Number(c.dataset.res);
       this.commit(); this.h.sound('select'); this.h.settingsChanged(); this.renderOptions();
@@ -907,10 +917,10 @@ export class Menu {
     this.show('results', false);
   }
 
-  showLoading(): void {
+  showLoading(boot = false): void {
     const el = this.screens.get('loading')!;
     el.innerHTML = `<div class="title" style="margin-top:8vh">LOADING</div>
-      <div class="loading-controls"><div class="controls-list">${controlsHtml(TOUCH ? 'touch' : 'keys')}</div></div>`;
+      ${boot ? '' : `<div class="loading-controls"><div class="controls-list">${controlsHtml(TOUCH ? 'touch' : 'keys')}</div></div>`}`;
     this.show('loading', false);
   }
 

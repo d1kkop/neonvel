@@ -21,16 +21,16 @@ export class Store {
   private readonly base = serverHttp();
 
   /** Sign-in options the server offers. */
-  async providers(): Promise<{ google: boolean; discord: boolean; dev: boolean } | null> {
+  async providers(): Promise<{ google: boolean; dev: boolean } | null> {
     try {
-      return (await (await fetch(`${this.base}/auth/providers`, { signal: AbortSignal.timeout(2500) })).json()) as { google: boolean; discord: boolean; dev: boolean };
+      return (await (await fetch(`${this.base}/auth/providers`, { signal: AbortSignal.timeout(2500) })).json()) as { google: boolean; dev: boolean };
     } catch {
       return null;
     }
   }
 
-  /** Go to the sign-in page (Google / Discord); it comes back to this page with the session in the address. */
-  signIn(provider: 'google' | 'discord' | 'dev', devName = ''): void {
+  /** Go to the sign-in page (Google); it comes back to this page with the session in the address. */
+  signIn(provider: 'google' | 'dev', devName = ''): void {
     const ret = window.location.origin + window.location.pathname;
     window.location.href = `${this.base}/auth/${provider}/start?return=${encodeURIComponent(ret)}${provider === 'dev' ? `&name=${encodeURIComponent(devName)}` : ''}`;
   }

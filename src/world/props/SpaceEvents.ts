@@ -19,7 +19,7 @@ const _up = new THREE.Vector3(0, 1, 0);
 const _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 
-function halo(color: THREE.ColorRepresentation, k = 1): THREE.Sprite {
+export function halo(color: THREE.ColorRepresentation, k = 1): THREE.Sprite {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({
     map: haloTexture(), color: new THREE.Color(color).multiplyScalar(k), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: false,
   }));
@@ -93,7 +93,7 @@ export class ShootingStars {
   private readonly stars: Streak[] = [];
   private readonly meteors: Streak[] = [];
   private starTimer = 1.5;
-  private meteorTimer = 14;
+  private meteorTimer = 6;
   private readonly frame = makeFrame();
   private readonly eye = new THREE.Vector3();
 
@@ -122,14 +122,14 @@ export class ShootingStars {
   private launch(s: Streak, fire: boolean): void {
     const az = Math.random() * Math.PI * 2;
     if (fire) {
-      // 900-1700 m away, high up, coming down at a slant: slow to the eye, on fire all the way.
-      const dist = 900 + Math.random() * 800;
-      s.pos.set(Math.cos(az) * dist, 380 + Math.random() * 320, Math.sin(az) * dist).add(this.eye);
+      // An enormous fireball far off (2.6-3.6 km), high up, coming down at a slant: slow to the eye, on fire all the way.
+      const dist = 2600 + Math.random() * 1000;
+      s.pos.set(Math.cos(az) * dist, 1300 + Math.random() * 700, Math.sin(az) * dist).add(this.eye);
       const side = az + Math.PI / 2 + (Math.random() - 0.5) * 1.2;
-      s.vel.set(Math.cos(side) * (0.5 + Math.random() * 0.5), -(0.75 + Math.random() * 0.5), Math.sin(side) * (0.5 + Math.random() * 0.5)).normalize().multiplyScalar(150 + Math.random() * 90);
-      s.life = 4.5 + Math.random() * 2;
-      s.len = 300 + Math.random() * 180;
-      s.width = 55 + Math.random() * 25;
+      s.vel.set(Math.cos(side) * (0.5 + Math.random() * 0.5), -(0.75 + Math.random() * 0.5), Math.sin(side) * (0.5 + Math.random() * 0.5)).normalize().multiplyScalar(380 + Math.random() * 180);
+      s.life = 6 + Math.random() * 2.5;
+      s.len = 1500 + Math.random() * 900;
+      s.width = 260 + Math.random() * 120;
     } else {
       const dist = 3200;
       const el = 0.2 + Math.random() * 0.9;
@@ -137,8 +137,8 @@ export class ShootingStars {
       const side = az + (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2) + (Math.random() - 0.5) * 0.8;
       s.vel.set(Math.cos(side), -(0.15 + Math.random() * 0.6), Math.sin(side)).normalize().multiplyScalar(2600 + Math.random() * 1600);
       s.life = 0.45 + Math.random() * 0.6;
-      s.len = 380 + Math.random() * 420;
-      s.width = 16 + Math.random() * 10;
+      s.len = 1300 + Math.random() * 1000;
+      s.width = 60 + Math.random() * 40;
     }
     s.age = 0;
     s.mesh.visible = true;
@@ -160,7 +160,7 @@ export class ShootingStars {
     if (this.meteorTimer <= 0) {
       const free = this.meteors.find((s) => !s.mesh.visible);
       if (free) this.launch(free, true);
-      this.meteorTimer = 16 + Math.random() * 18;
+      this.meteorTimer = 12 + Math.random() * 14;
     }
     for (const s of [...this.stars, ...this.meteors]) {
       if (!s.mesh.visible) continue;
@@ -224,10 +224,12 @@ export class MeteorStrike {
   private readonly sparks: THREE.Points;
   private readonly sparkMat: THREE.ShaderMaterial;
   private readonly smoke: THREE.Sprite[] = [];
+  /** The player already drove into this strike (slowed once per strike). */
+  private struck = false;
 
   constructor(
     private readonly track: LoopTrack,
-    private readonly fx: { sound?: (kind: 'meteor') => void; shake?: (amount: number) => void } = {},
+    private readonly fx: { sound?: (kind: 'meteor') => void; shake?: (amount: number) => void; hit?: (slow: number, label: string) => void } = {},
   ) {
     this.group.name = 'meteor-strike';
     this.rock = new THREE.Mesh(new THREE.IcosahedronGeometry(1.1, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff8a30').multiplyScalar(2.2), fog: false }));
@@ -389,8 +391,18 @@ export class MeteorStrike {
         const dist = this.hit.distanceTo(this.eye);
         this.fx.sound?.('meteor');
         this.fx.shake?.(THREE.MathUtils.clamp(1.2 - dist / 110, 0.25, 1));
+        this.struck = false;
       }
       return;
+    }
+    // Driving into the impact (fireball, then the burning crater) slows you down, once per strike.
+    if (!this.struck && this.age < 5) {
+      const dx = this.eye.x - this.hit.x, dz = this.eye.z - this.hit.z;
+      if (dx * dx + dz * dz < 4.5 * 4.5 && Math.abs(this.eye.y - 2.5 - this.hit.y) < 3) {
+        this.struck = true;
+        this.fx.hit?.(0.4, 'METEOR!');
+        this.fx.shake?.(1);
+      }
     }
     // After the impact: white flash (0.3 s), orange fireball rising (0.9 s), shock ring (0.7 s), sparks (~1.8 s),
     // smoke (~3 s), crater cooling (12 s).
@@ -434,7 +446,7 @@ export class MeteorStrike {
 // ------------------------------------------------------------------ flying saucer
 
 /** Classic saucer (original design): brushed disc, glass dome with a green glow, a ring of running lights. */
-function saucer(): { group: THREE.Group; lights: THREE.MeshBasicMaterial[]; spin: THREE.Group; beam: THREE.Mesh } {
+export function saucer(): { group: THREE.Group; lights: THREE.MeshBasicMaterial[]; spin: THREE.Group; beam: THREE.Mesh } {
   const g = new THREE.Group();
   const metal = new THREE.MeshStandardMaterial({ color: '#b9c2d0', metalness: 0.95, roughness: 0.22 });
   const dark = new THREE.MeshStandardMaterial({ color: '#3a4050', metalness: 0.9, roughness: 0.35 });
@@ -484,7 +496,7 @@ function saucer(): { group: THREE.Group; lights: THREE.MeshBasicMaterial[]; spin
   return { group: g, lights, spin, beam };
 }
 
-const SAUCER_SCALE = 1.35;
+export const SAUCER_SCALE = 1.35;
 
 /**
  * The saucer drops in beside the player, matches their speed and flies along (bobbing, banking, lights running),

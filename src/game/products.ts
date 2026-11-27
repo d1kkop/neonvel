@@ -7,11 +7,11 @@ export const LEVEL_PRICES: Record<string, number> = {
   'palm-coast': 0,
   'desert-mirage': 0,
   'harbor-docks': 0,
-  // Locked: the four special worlds.
-  'cyber-grid': 100,
-  'snow-pass': 100,
+  'cyber-grid': 0,
+  // Locked: the last three worlds, $1 each.
   'orbit-run': 100,
-  'deep-blue': 150,
+  'snow-pass': 100,
+  'deep-blue': 100,
 };
 
 export const LEVEL_NAMES: Record<string, string> = {

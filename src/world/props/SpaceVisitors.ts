@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { applyAtmosphere } from '../../render/atmosphere';
 import { buildCar, haloTexture } from '../../game/car/CarBuilder';
 import { LoopTrack, makeFrame } from '../../track/Track';
+import { halo, saucer, SAUCER_SCALE } from './SpaceEvents';
 
 /**
  * Orbit Run guests that show up near the player now and then:
@@ -177,9 +178,31 @@ export class FloatingRoadster extends Encounter {
     tag.position.y = 1.9;
     this.marker.add(arrow, tag);
     this.group.add(this.marker);
+    // A little saucer bullies the Roadster: hovers over it and zaps laser beams at it (always just missing);
+    // the Roadster jinks away from every shot.
+    this.ufo.group.scale.setScalar(SAUCER_SCALE * 0.9);
+    (this.ufo.beam.material as THREE.ShaderMaterial).uniforms.uK.value = 0; // no tractor beam
+    this.laser.renderOrder = 8;
+    this.laser.visible = false;
+    this.zap.visible = false;
+    this.group.add(this.ufo.group, this.laser, this.zap);
   }
 
   private readonly marker = new THREE.Group();
+  private readonly ufo = saucer();
+  /** Laser: a unit cylinder along +Y, stretched from the saucer to where the shot lands. */
+  private readonly laser = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 1, 8, 1, true).translate(0, 0.5, 0),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color('#5aff8a').multiplyScalar(4), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false }));
+  private readonly zap = halo('#9affb0', 2.5);
+  private readonly ufoPos = new THREE.Vector3();
+  private readonly shotAt = new THREE.Vector3();
+  private readonly tmpV = new THREE.Vector3();
+  private shotTimer = 1.5;
+  private shotAge = 9;
+  /** Sideways jink (m) and its speed: the Roadster dodging the shots. */
+  private dodge = 0;
+  private dodgeV = 0;
+  private hop = 0;
 
   private side = 1;
   private readonly q = new THREE.Quaternion();
@@ -192,6 +215,9 @@ export class FloatingRoadster extends Encounter {
     this.track.frameAt(player.s + 70, this.frame);
     // Nose toward the road, slightly angled, so you see the astronaut as you come up to it.
     this.body.quaternion.setFromAxisAngle(_up, Math.atan2(this.frame.forward.x, this.frame.forward.z) + Math.PI + this.side * 0.9);
+    this.dodge = this.dodgeV = this.hop = 0;
+    this.shotTimer = 1.2;
+    this.shotAge = 9;
     return true;
   }
 
@@ -201,11 +227,53 @@ export class FloatingRoadster extends Encounter {
     const along = 80 - (this.age / dur) * 120;
     const hw = this.track.width / 2;
     this.track.frameAt(player.s + along, this.frame);
-    this.group.position.copy(this.frame.position).addScaledVector(this.frame.right, this.side * (hw + 9 + Math.sin(time * 0.3) * 1.5));
-    this.group.position.y += 5.5 + Math.sin(time * 0.5) * 1.2;
+    // Dodging: a springy sideways jink (kept off the road side) plus a little hop.
+    this.dodgeV += (-this.dodge * 6 - this.dodgeV * 2.4) * dt;
+    this.dodge += this.dodgeV * dt;
+    this.hop = Math.max(0, this.hop - dt * 3);
+    this.group.position.copy(this.frame.position).addScaledVector(this.frame.right, this.side * (hw + 9 + Math.sin(time * 0.3) * 1.5) + this.dodge);
+    this.group.position.y += 5.5 + Math.sin(time * 0.5) * 1.2 + Math.sin(this.hop * Math.PI) * 1.6;
     this.body.quaternion.premultiply(this.q.setFromAxisAngle(this.axis, 0.14 * dt));
+    this.body.quaternion.premultiply(this.q.setFromAxisAngle(this.frame.forward, -this.dodgeV * 0.05 * dt * 10)); // rolls into the jink
     this.marker.position.y = 5.2 + Math.sin(time * 3.2) * 0.6;
     this.marker.children[0].rotation.y += dt * 1.5;
+
+    // The bully: swoops in over the first second, then hovers above and a bit behind, wobbling.
+    const inK = Math.min(1, this.age / 1.2);
+    this.ufoPos.copy(this.frame.forward).multiplyScalar(-6 + Math.sin(time * 1.3) * 3 - (1 - inK) * 40)
+      .addScaledVector(this.frame.right, -this.dodge * 0.6 + Math.sin(time * 0.9) * 3);
+    this.ufoPos.y += 11 + Math.sin(time * 1.7) * 1.2 + (1 - inK) * 30;
+    this.ufo.group.position.copy(this.ufoPos);
+    this.ufo.group.rotation.set(Math.sin(time * 2.3) * 0.12, 0, Math.cos(time * 1.9) * 0.12);
+    this.ufo.spin.rotation.y += dt * 4;
+    this.ufo.lights.forEach((m, i) => m.color.setHSL((i / this.ufo.lights.length + time * 0.3) % 1, 1, 0.5).multiplyScalar(1.5 + 2 * Math.max(0, Math.sin(time * 8 + i))));
+    // Shots: every ~1 s once it is in place; each lands 2-3.5 m beside the car (where it just was) and the
+    // Roadster jinks the other way.
+    this.shotTimer -= dt;
+    this.shotAge += dt;
+    if (this.shotTimer <= 0 && inK >= 1 && this.age < dur - 1) {
+      this.shotTimer = 0.7 + Math.random() * 0.7;
+      this.shotAge = 0;
+      const miss = (Math.random() < 0.5 ? -1 : 1) * (2 + Math.random() * 1.5);
+      this.shotAt.copy(this.frame.right).multiplyScalar(miss).addScaledVector(this.frame.forward, (Math.random() - 0.5) * 3);
+      this.shotAt.y += (Math.random() - 0.5) * 1.5;
+      this.dodgeV += -Math.sign(miss) * (9 + Math.random() * 5);
+      this.hop = 1;
+    }
+    const on = this.shotAge < 0.16;
+    this.laser.visible = on;
+    this.zap.visible = this.shotAge < 0.35;
+    if (on) {
+      this.tmpV.copy(this.shotAt).sub(this.ufoPos);
+      const len = this.tmpV.length();
+      this.laser.position.copy(this.ufoPos);
+      this.laser.quaternion.setFromUnitVectors(_up, this.tmpV.divideScalar(len));
+      this.laser.scale.set(1 + Math.sin(time * 90) * 0.3, len, 1 + Math.sin(time * 90) * 0.3);
+    }
+    if (this.zap.visible) {
+      this.zap.position.copy(this.shotAt);
+      this.zap.scale.setScalar(6 * (1 - this.shotAge / 0.35) + 1);
+    }
     return this.age < dur;
   }
 }

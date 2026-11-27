@@ -140,7 +140,7 @@ export class Lobby extends DurableObject<Env> {
     switch (msg.t) {
       case 'hello': {
         const p = await playerFor(db, msg.token);
-        if (!p) return this.send(c, { t: 'error', code: 'auth', message: 'Sign in with Google or Discord first.' });
+        if (!p) return this.send(c, { t: 'error', code: 'auth', message: 'Sign in with Google first.' });
         c.player = p;
         c.owned = await owned(db, p.id);
         this.send(c, { t: 'welcome', id: p.id, name: p.name, rating: p.rating, games: p.games, owned: c.owned, storeMode: config(this.env).storeMode });

@@ -8,7 +8,7 @@ import { ChaseCamera } from '../game/ChaseCamera';
 import { World } from '../game/World';
 import { AI_DIFFICULTY } from '../game/CarPhysics';
 import { defaultLaps } from '../game/laps';
-import { preloadCarModels } from '../game/car/carModels';
+import { preloadCarModels, setCarDetail } from '../game/car/carModels';
 import { type GameMode, HighwayMode } from '../game/modes';
 import { levelById } from '../levels';
 import type { LevelDef } from '../levels/types';
@@ -192,14 +192,19 @@ export class App {
       pause: () => this.pause(),
     });
 
-    this.menu.show('main');
-    // Title background: built once, with the hand-modelled cars (waits up to 3 s for those small .glb files).
+    // First visit: LOADING until the title background is built and compiled (the menu over a still-black
+    // canvas looked broken). A fallback shows the menu anyway if that takes very long.
+    this.menu.showLoading(true);
+    window.setTimeout(() => this.showTitleMenu(), 60000);
+    // Title background: built once, with the hand-modelled cars.
     // Building it first and again when the models arrived gave a big hitch a few seconds in (worst on phones).
-    void Promise.race([preloadCarModels(this.settings.quality !== 'low'), new Promise((r) => window.setTimeout(r, 3000))]).then(() => {
+    // Wait for every model (behind the LOADING screen): a car whose model is not in yet would show the old
+    // procedural stand-in body, and only the bought models may ever be seen.
+    void preloadCarModels(!this.lightCars()).then(() => {
       this.bootDone = true;
       if (this.state === 'menu' && !this.world) this.loadMenuWorld(levelById(MENU_LEVEL), true);
     });
-    // Returning from a Google / Discord sign-in?
+    // Returning from a Google sign-in?
     void this.takeSignIn();
     // Returning from Stripe Checkout?
     void this.store.confirmFromUrl().then((r) => {
@@ -339,7 +344,18 @@ export class App {
       if (this.world !== w) return;
       this.carReflections(w);
       this.compiling = false;
+      // Two frames later the background is on screen: then swap the boot LOADING for the menu.
+      requestAnimationFrame(() => requestAnimationFrame(() => this.showTitleMenu()));
     });
+  }
+
+  private titleShown = false;
+
+  /** Once: replace the boot LOADING screen with the main menu. */
+  private showTitleMenu(): void {
+    if (this.titleShown) return;
+    this.titleShown = true;
+    if (this.state === 'menu' && this.menu.current === 'loading') this.menu.show('main');
   }
 
   private previewTimer = 0;
@@ -383,7 +399,7 @@ export class App {
     this.paused = false;
     // Let the loading screen paint before the (synchronous) level build.
     window.setTimeout(async () => {
-      await preloadCarModels(this.settings.quality !== 'low'); // usually done long before (loaded at startup)
+      await preloadCarModels(!this.lightCars()); // usually done long before (loaded at startup)
       const modeId = this.settings.mode ?? 'race';
       const w = this.buildWorld(level, weather, modeId === 'race' ? this.settings.opponents : 0);
       w.weather.setFog(this.raceFog(level), true);
@@ -474,8 +490,8 @@ export class App {
     if (!w || this.paused || this.state === 'loading') return;
 
     if (this.state === 'menu') {
-      // The demo car behind the menus stands still while Options is open.
-      if (this.menu.current !== 'options') {
+      // The demo cars behind the menus keep driving in every menu, Options included.
+      {
         w.step(dt, null);
         // Keep the attract-mode pack together round the followed car, so all 10 stay in view.
         const lead = w.cars[0], L = w.track.length;
@@ -599,7 +615,7 @@ export class App {
 
   // --------------------------------------------------------------- accounts
 
-  /** Back from Google / Discord: the session token comes in the address (#auth=…); keep it, clean the address. */
+  /** Back from Google: the session token comes in the address (#auth=…); keep it, clean the address. */
   private async takeSignIn(): Promise<void> {
     const h = window.location.hash;
     const tok = /[#&]auth=([\w-]+)/.exec(h)?.[1];
@@ -930,7 +946,7 @@ export class App {
     const m = isLevel ? { name: LEVEL_NAMES[lid] ?? lid, price: levelPrice(lid) } : carById(id);
     const status = (t: string) => (isLevel ? this.menu.toast(t) : this.menu.setGarageStatus(t));
     if (!this.settings.authToken) {
-      status('Sign in with Google or Discord first (Netplay screen): purchases belong to your account.');
+      status('Sign in with Google first (Netplay screen): purchases belong to your account.');
       return;
     }
     status(`Starting purchase of ${m.name} (${formatPrice(m.price)})…`);
@@ -1088,6 +1104,12 @@ export class App {
     this.audio.playMusic(pick === 'auto' ? this.world?.level.music ?? 'space-city' : pick);
   }
 
+  /** Light car models for every car? (Options: car detail; auto = only on low graphics.) */
+  private lightCars(): boolean {
+    const d = this.settings.carDetail ?? 'auto';
+    return d === 'light' || (d === 'auto' && this.settings.quality === 'low');
+  }
+
   private applySettings(): void {
     this.hud.setTouchMode(this.settings.touchControls ?? 'buttons', this.settings.autoGas !== false);
     if (this.world) {
@@ -1100,6 +1122,8 @@ export class App {
     this.audio.setVolume('sfx', v.sfx);
     this.audio.setVolume('ambience', v.ambience);
     this.applyQuality();
+    setCarDetail(this.lightCars());
+    if (this.bootDone) void preloadCarModels(!this.lightCars()); // full models picked later: fetch them now
     this.renderer.lighting = Math.min(1, Math.max(0.5, this.settings.lighting ?? 1));
     if (this.world) this.world.road.beatSides = this.settings.beatSides ?? 1;
 
@@ -1271,7 +1295,7 @@ export class App {
 
   /** Netplay screen opened: connect and sign in; the server then pushes the lobby list. */
   private async netOpen(): Promise<void> {
-    if (!this.settings.authToken) { this.menu.setNetStatus('Sign in with Google or Discord first.'); return; }
+    if (!this.settings.authToken) { this.menu.setNetStatus('Sign in with Google first.'); return; }
     this.menu.setNetStatus('Connecting to server…');
     if (!(await this.ensureOnline())) this.menu.setNetStatus('Game server offline — try again in a moment.');
   }

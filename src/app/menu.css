@@ -94,7 +94,6 @@ table.lb td { padding: 6px; border-bottom: 1px solid rgba(255, 255, 255, .06); f
 table.lb tr.me td { color: var(--yellow); }
 .btn.signin { font-size: 13px; padding: 8px 14px; }
 .btn.signin.google { background: #ffffff; color: #1f1f1f; border-color: #dadce0; }
-.btn.signin.discord { background: #5865f2; color: #ffffff; border-color: #5865f2; }
 table.lb tr.gap td { text-align: center; opacity: .5; padding: 2px; border-bottom: none; }
 /* Long boards scroll inside the panel; the header row stays put. */
 .lb-scroll { max-height: 46vh; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--cyan) transparent; }

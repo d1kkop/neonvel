@@ -16,8 +16,6 @@ export interface Env {
   STRIPE_WEBHOOK_SECRET?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
-  DISCORD_CLIENT_ID?: string;
-  DISCORD_CLIENT_SECRET?: string;
   /** Signs match tickets (lobby -> room). Any long random string. */
   TICKET_SECRET?: string;
 }

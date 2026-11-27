@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { createPlanet } from './LevelProps';
 
-interface Moon { mesh: THREE.Object3D; center: THREE.Vector3; r: number; speed: number; phase: number; tilt: number }
 
 /** Soft round glow (radial gradient) for coronas and halos. */
 function glowTexture(stops: [number, string][]): THREE.CanvasTexture {
@@ -86,50 +85,26 @@ function createHyperGiant(dir: THREE.Vector3, dist: number, radius: number): { g
   };
 }
 
-/** Far-off enormous bodies (gas giants, a ringed giant, a red hypergiant) plus moons that circle them. */
+/** Far-off enormous bodies: a banded gas giant, a ringed giant and a red hypergiant. */
 export function createSpaceGiants(scene: THREE.Scene): (time: number, dt: number) => void {
   const spinners: { obj: THREE.Object3D; rate: number }[] = [];
-  // Moons sit close to their planet and go round fast enough to see them move (one orbit in ~20-50 s).
-  const moons: Moon[] = [];
   const add = (p: THREE.Group, rate: number) => { scene.add(p); spinners.push({ obj: p, rate }); return p; };
-  const moon = (center: THREE.Vector3, r: number, size: number, speed: number, phase: number, tilt: number, a: string, b: string, kind: 'rocky' | 'ice', seed: number) => {
-    const m = createPlanet(new THREE.Vector3(), size, a, b, false, kind, seed);
-    scene.add(m);
-    moons.push({ mesh: m, center, r, speed, phase, tilt });
-  };
 
   // Jupiter-like banded giant with a storm spot.
   const jPos = new THREE.Vector3(-3300, 1100, -4300);
-  add(createPlanet(jPos, 2400, '#e8b878', '#a8541e', false, 'gas', 2.7), 0.004);
-  moon(jPos, 3700, 200, 0.16, 0.5, 0.15, '#d8c8a0', '#7a6a50', 'rocky', 1.2);
-  moon(jPos, 3100, 130, 0.24, 2.4, -0.25, '#e8e4f0', '#6a8ab0', 'ice', 4.4);
-  moon(jPos, 4200, 110, 0.12, 4.4, 0.3, '#c8704a', '#5a2a18', 'rocky', 7.7);
+  add(createPlanet(jPos, 3300, '#e8b878', '#a8541e', false, 'gas', 2.7), 0.004);
 
   // Ringed giant, pale gold and cream.
-  const sPos = new THREE.Vector3(3400, 1500, 3000);
+  const sPos = new THREE.Vector3(2300, 1500, 3950);
   const saturn = add(createPlanet(sPos, 1500, '#f0d8a0', '#b88a50', true, 'gas', 6.1), 0.003);
   saturn.rotation.z = 0.3;
-  moon(sPos, 2500, 140, 0.22, 1.0, 0.1, '#e8f0ff', '#8aa8d0', 'ice', 3.3);
-  moon(sPos, 3000, 100, 0.15, 3.6, -0.2, '#a8a094', '#58544c', 'rocky', 9.9);
-
-  // The old orange gas giant also gets moons now.
-  const oPos = new THREE.Vector3(2600, 500, -3200);
-  moon(oPos, 1350, 80, 0.3, 0.0, 0.2, '#b8b4ac', '#6a6660', 'rocky', 3.1);
-  moon(oPos, 1750, 60, 0.21, 3.0, -0.3, '#e0eaff', '#5a8ac8', 'ice', 5.2);
 
   // Red hypergiant far in the back.
   const star = createHyperGiant(new THREE.Vector3(5000, 2400, -900).normalize(), 5600, 3300);
   scene.add(star.group);
 
-  const tmp = new THREE.Vector3();
   return (time, dt) => {
     for (const s of spinners) s.obj.rotation.y += s.rate * dt;
-    for (const m of moons) {
-      const a = m.phase + time * m.speed;
-      tmp.set(Math.cos(a) * m.r, Math.sin(a) * m.r * Math.sin(m.tilt), Math.sin(a) * m.r);
-      m.mesh.position.copy(m.center).add(tmp);
-      m.mesh.rotation.y += 0.05 * dt;
-    }
     star.update(time);
   };
 }

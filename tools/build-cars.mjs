@@ -23,6 +23,8 @@ const CARS = {
   asti: 'Asti', phoenix: 'Phoenix', gallo: 'Gallo_99', duke: 'Duke_69', duntov: 'Duntov', cheetah: 'Cheetah', nfr: 'NFR',
   // Classic Vehicle Set (Fab, Unreal-only): tools/unreal/export_classic.py, then tools/blender/prep_classic.py.
   classic: ['Classic', path.join(root, 'assets-src/classicvehicle/classic.blend')],
+  // Super Car Phoenix (LVLXP, Fab, Unreal-only): tools/unreal/export_phoenix.py + export_phoenix_skm.py, then tools/blender/prep_phoenix.py.
+  sphoenix: ['SuperPhoenix', path.join(root, 'assets-src/phoenix/phoenix.blend')],
 };
 
 const wanted = process.argv.slice(2);

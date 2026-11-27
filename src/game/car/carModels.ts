@@ -6,7 +6,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
  * Hand-modelled (Blender) car bodies, loaded as small compressed .glb files from public/models/cars/.
  * Optional: a car style without a model (or a failed download) keeps its procedural body.
  */
-const AVAILABLE = ['asti', 'phoenix', 'gallo', 'duke', 'duntov', 'cheetah', 'nfr', 'classic']; // body styles with a model (tools/build-cars.mjs)
+const AVAILABLE = ['asti', 'phoenix', 'gallo', 'duke', 'duntov', 'cheetah', 'classic', 'sphoenix']; // body styles with a model (tools/build-cars.mjs)
 const STYLE_FOR: Record<string, string> = {}; // body style → model file (default: same name)
 
 const models = new Map<string, THREE.Object3D>();
@@ -62,8 +62,13 @@ export function preloadCarModels(withHigh = true): Promise<void> {
   return withHigh ? Promise.all([loading, loadingHigh]).then(() => undefined) : loading;
 }
 
+/** Car detail from Options: true = light models for every car, false = full models for every car, null = per car. */
+let forceLow: boolean | null = null;
+export function setCarDetail(low: boolean | null): void { forceLow = low; }
+
 /** A fresh copy of the model for a body style (`low` = the light version), or null when there is none (yet). */
 export function carModelFor(styleName: string, low = false): THREE.Object3D | null {
+  if (forceLow !== null) low = forceLow;
   const key = STYLE_FOR[styleName] ?? styleName;
   const m = low ? lowModels.get(key) ?? models.get(key) : models.get(key) ?? lowModels.get(key);
   return m ? m.clone(true) : null;

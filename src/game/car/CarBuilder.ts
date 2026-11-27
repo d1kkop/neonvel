@@ -236,6 +236,7 @@ export const CAR_STYLES: Record<string, CarStyle> = {
   cheetah: modelStyle('cheetah', 5.03, 2.14, 0.35, [0.18, 0.8]),
   nfr: modelStyle('nfr', 4.9, 2.18, 0.35, [0.18, 0.8]),
   classic: modelStyle('classic', 4.44, 1.81, 0.36, [0.2, 0.8]),
+  sphoenix: modelStyle('sphoenix', 5.06, 2.1, 0.39, [0.2, 0.8]),
 };
 
 export interface CarOptions {

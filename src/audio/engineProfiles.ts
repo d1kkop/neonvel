@@ -161,6 +161,14 @@ export const ENGINES: Record<string, EngineProfile> = {
     redline: 8400, idle: 1000, turbo: 0, crackle: 1, bright: 1,
     gears: [0.2, 0.34, 0.49, 0.65, 0.82, 1], shift: 'seq', shiftTime: 0.09, formants: [[1200, 2, 7], [2800, 2, 6]], howl: [4, 0.65], gearWhine: 0.8,
   },
+  // Twin-turbo flat-plane V8 hypercar (Super Phoenix): the race V8 pushed harder — snarling, sky-high revs
+  // (10,200), seven tight gears so it lives near the top, turbo whistle, flutter and crackle on every lift.
+  v8tt: {
+    orders: [[2, 1], [4, 1], [6, 0.7], [8, 0.55], [1, 0.4], [3, 0.25]], note: 2, tilt: 0.65, fill: 0.24, drive: 4.6, detune: 10, raspHz: 1250, whoosh: 0.55,
+    name: 'Twin-turbo flat-plane V8', cylinders: 8, firing: even(8), resonances: [[240, 8], [950, 7], [2900, 6]], pipeMs: 1.5, pipeFeedback: 0.55, rasp: 0.9,
+    redline: 10200, idle: 1100, turbo: 0.75, crackle: 1, bright: 1, sub: 0.45, flutter: 0.7,
+    gears: [0.24, 0.37, 0.5, 0.63, 0.76, 0.88, 1], shift: 'seq', shiftTime: 0.07, formants: [[1300, 2, 8], [3000, 2, 7]], howl: [4, 0.8], gearWhine: 0.6,
+  },
   // W16: a thunderous, dense rumble with four turbos sucking air; seven gears that shift almost unheard.
   w16: {
     orders: [[2, 0.8], [4, 1], [1, 0.6], [0.5, 0.4], [8, 0.5], [6, 0.3]], note: 2, tilt: 1.3, fill: 0.25, drive: 2.0, detune: 12, raspHz: 400, whoosh: 0.8,

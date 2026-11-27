@@ -2,7 +2,7 @@
  * Neon Velocity game server on Cloudflare (Worker entry).
  *  - WebSocket /ws (or any path)  → the Lobby Durable Object (matchmaking, quick-race lap timing)
  *  - WebSocket /room/<matchId>   → that race's Room Durable Object (started near the players)
- *  - /auth/*      sign in with Google or Discord (OAuth), session tokens; developer sign-in when not https
+ *  - /auth/*      sign in with Google (OAuth), session tokens; developer sign-in when not https
  *  - /store/*     Stripe Checkout (with Stripe Tax), test mode without a Stripe key
  *  - /stripe/webhook  Stripe tells the server a checkout is paid (signature checked)
  *  - /leaderboard, /laptimes
@@ -32,18 +32,13 @@ function oauth(env: Env) {
       authorize: 'https://accounts.google.com/o/oauth2/v2/auth', token: 'https://oauth2.googleapis.com/token',
       me: 'https://openidconnect.googleapis.com/v1/userinfo', scope: 'openid profile',
     },
-    discord: {
-      id: env.DISCORD_CLIENT_ID ?? '', secret: env.DISCORD_CLIENT_SECRET ?? '',
-      authorize: 'https://discord.com/oauth2/authorize', token: 'https://discord.com/api/oauth2/token',
-      me: 'https://discord.com/api/users/@me', scope: 'identify',
-    },
   };
 }
-type Provider = 'google' | 'discord';
+type Provider = 'google';
 
 function providers(env: Env): Record<string, boolean> {
   const o = oauth(env);
-  return { google: !!(o.google.id && o.google.secret), discord: !!(o.discord.id && o.discord.secret), dev: config(env).DEV_LOGIN };
+  return { google: !!(o.google.id && o.google.secret), dev: config(env).DEV_LOGIN };
 }
 
 /** Where a finished sign-in may send the browser back to: the game's own address (local ones in development). */
@@ -164,7 +159,7 @@ async function api(req: Request, env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
   if (path === '/stripe/webhook' && req.method === 'POST') return stripeWebhook(env, await req.text(), req.headers.get('stripe-signature') ?? '');
   if (path === '/auth/providers') return json(providers(env));
-  const start = /^\/auth\/(google|discord|dev)\/start$/.exec(path);
+  const start = /^\/auth\/(google|dev)\/start$/.exec(path);
   if (start) {
     const ret = safeReturn(env, url.searchParams.get('return') ?? cfg.PUBLIC_URL);
     if (start[1] === 'dev') {
@@ -181,7 +176,7 @@ async function api(req: Request, env: Env, url: URL): Promise<Response | null> {
     const q = new URLSearchParams({ client_id: o.id, redirect_uri: `${cfg.API_URL}/auth/${provider}/callback`, response_type: 'code', scope: o.scope, state, prompt: provider === 'google' ? 'select_account' : 'none' });
     return redirect(`${o.authorize}?${q}`);
   }
-  const cb = /^\/auth\/(google|discord)\/callback$/.exec(path);
+  const cb = /^\/auth\/(google)\/callback$/.exec(path);
   if (cb) {
     try {
       return redirect(await oauthCallback(env, cb[1] as Provider, url.searchParams.get('code') ?? '', url.searchParams.get('state') ?? ''));
@@ -217,7 +212,7 @@ async function api(req: Request, env: Env, url: URL): Promise<Response | null> {
   if (path === '/store/checkout' && req.method === 'POST') {
     const b = await body(req);
     const p = await playerFor(db, b.token);
-    if (!p) return json({ error: 'Sign in with Google or Discord first (Netplay screen).' }, 401);
+    if (!p) return json({ error: 'Sign in with Google first (Netplay screen).' }, 401);
     return json(await checkout(env, p, String(b.item ?? '')));
   }
   if (path === '/store/confirm') return json(await confirm(env, url.searchParams.get('session_id') ?? ''));

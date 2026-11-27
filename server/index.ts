@@ -4,7 +4,7 @@
  *  - HTTP GET /leaderboard for a JSON leaderboard
  *  - SQLite (node:sqlite, no native deps) stores players + ratings + race history
  *  - Elo matchmaking: the search window widens the longer you wait
- *  - Accounts: sign in with Google or Discord (OAuth); a session token identifies the player
+ *  - Accounts: sign in with Google (OAuth); a session token identifies the player
  *  - Store: Stripe Checkout (with Stripe Tax) + webhook; test mode without a Stripe key
  *  - Track records: the server times every lap itself from the car's progress reports
  *
@@ -13,7 +13,7 @@
  *   PUBLIC_URL            where the game is served (https://… in production)
  *   API_URL               public address of this server (OAuth callbacks); default: PUBLIC_URL's origin in
  *                         production (same domain, behind the reverse proxy), else http://localhost:PORT
- *   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET, DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET
+ *   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
  *   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_TAX (default on), STORE_CURRENCY (default usd)
  *   STORE_TEST_MODE=0     no free test purchases when Stripe is not configured
  *   AUTH_DEV=0            no developer sign-in (it is only ever offered when PUBLIC_URL is not https)
@@ -55,7 +55,7 @@ db.exec(`
     result TEXT NOT NULL
   );
 `);
-// Accounts: a player row can belong to a Google or Discord account (provider + the provider's user id).
+// Accounts: a player row can belong to a Google account (provider + the provider's user id).
 {
   const cols = (db.prepare('PRAGMA table_info(players)').all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes('provider')) db.exec('ALTER TABLE players ADD COLUMN provider TEXT');
@@ -262,7 +262,7 @@ function readRaw(req: http.IncomingMessage, limit = 1_000_000): Promise<Buffer> 
   });
 }
 
-// ------------------------------------------------------------------ accounts (Google / Discord sign-in)
+// ------------------------------------------------------------------ accounts (Google sign-in)
 
 const OAUTH = {
   google: {
@@ -270,18 +270,13 @@ const OAUTH = {
     authorize: 'https://accounts.google.com/o/oauth2/v2/auth', token: 'https://oauth2.googleapis.com/token',
     me: 'https://openidconnect.googleapis.com/v1/userinfo', scope: 'openid profile',
   },
-  discord: {
-    id: process.env.DISCORD_CLIENT_ID ?? '', secret: process.env.DISCORD_CLIENT_SECRET ?? '',
-    authorize: 'https://discord.com/oauth2/authorize', token: 'https://discord.com/api/oauth2/token',
-    me: 'https://discord.com/api/users/@me', scope: 'identify',
-  },
 } as const;
 type Provider = keyof typeof OAUTH;
 const DEV_LOGIN = !IS_PROD && process.env.AUTH_DEV !== '0';
 const pendingLogins = new Map<string, { provider: Provider; ret: string; created: number }>();
 
 function providers(): Record<string, boolean> {
-  return { google: !!(OAUTH.google.id && OAUTH.google.secret), discord: !!(OAUTH.discord.id && OAUTH.discord.secret), dev: DEV_LOGIN };
+  return { google: !!(OAUTH.google.id && OAUTH.google.secret), dev: DEV_LOGIN };
 }
 
 /** Where a finished sign-in may send the browser back to: the game's own address (any local one in development). */
@@ -669,9 +664,9 @@ function onMessage(c: Client, raw: string): void {
   }
   switch (msg.t) {
     case 'hello': {
-      // Signed-in players only (Google / Discord): the session token says who this is.
+      // Signed-in players only (Google): the session token says who this is.
       const p = playerFor(msg.token);
-      if (!p) return send(c, { t: 'error', code: 'auth', message: 'Sign in with Google or Discord first.' });
+      if (!p) return send(c, { t: 'error', code: 'auth', message: 'Sign in with Google first.' });
       c.player = p;
       send(c, { t: 'welcome', id: p.id, name: p.name, rating: p.rating, games: p.games, owned: owned(p.id), storeMode: STRIPE_KEY ? 'stripe' : TEST_MODE ? 'test' : 'off' });
       break;
@@ -782,7 +777,7 @@ const httpServer = http.createServer(async (req, res) => {
     }
     // --- sign-in
     if (url.pathname === '/auth/providers') return json(providers());
-    const start = /^\/auth\/(google|discord|dev)\/start$/.exec(url.pathname);
+    const start = /^\/auth\/(google|dev)\/start$/.exec(url.pathname);
     if (start) {
       const ret = safeReturn(String(url.searchParams.get('return') ?? PUBLIC_URL));
       if (start[1] === 'dev') {
@@ -805,7 +800,7 @@ const httpServer = http.createServer(async (req, res) => {
       res.setHeader('Location', `${cfg.authorize}?${q}`);
       return res.end();
     }
-    const cb = /^\/auth\/(google|discord)\/callback$/.exec(url.pathname);
+    const cb = /^\/auth\/(google)\/callback$/.exec(url.pathname);
     if (cb) {
       let dest: string;
       try {
@@ -846,7 +841,7 @@ const httpServer = http.createServer(async (req, res) => {
     if (url.pathname === '/store/checkout' && req.method === 'POST') {
       const body = await readJson(req);
       const p = playerFor(body.token);
-      if (!p) return json({ error: 'Sign in with Google or Discord first (Netplay screen).' }, 401);
+      if (!p) return json({ error: 'Sign in with Google first (Netplay screen).' }, 401);
       return json(await checkout(p, String(body.item ?? '')));
     }
     if (url.pathname === '/store/confirm') return json(await confirm(String(url.searchParams.get('session_id') ?? '')));
@@ -889,5 +884,5 @@ setInterval(() => {
 httpServer.listen(PORT, () => {
   const pv = providers();
   console.log(`Neon Velocity server on ws://localhost:${PORT}  (db: ${DB_PATH})  store: ${STRIPE_KEY ? `STRIPE${STRIPE_WEBHOOK_SECRET ? ' + webhook' : ' (no webhook secret!)'}${STRIPE_TAX ? ' + tax' : ''}` : TEST_MODE ? 'TEST MODE (purchases are free test grants)' : 'off'}`);
-  console.log(`  sign-in: ${['google', 'discord', 'dev'].filter((k) => pv[k]).join(', ') || 'none configured'}   public: ${PUBLIC_URL}   api: ${API_URL}`);
+  console.log(`  sign-in: ${['google', 'dev'].filter((k) => pv[k]).join(', ') || 'none configured'}   public: ${PUBLIC_URL}   api: ${API_URL}`);
 });

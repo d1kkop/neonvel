@@ -9,7 +9,7 @@ import { snowPass } from './snowPass';
 import type { LevelDef } from './types';
 
 /** All playable levels, in menu order. */
-export const LEVELS: LevelDef[] = [neonSkyway, palmCoast, desertMirage, harborDocks, snowPass, cyberGrid, orbitRun, deepBlue];
+export const LEVELS: LevelDef[] = [neonSkyway, palmCoast, desertMirage, harborDocks, cyberGrid, orbitRun, snowPass, deepBlue];
 
 /** Placeholder cards for levels that aren't built yet (none right now). */
 export const UPCOMING: { name: string; tagline: string; cardColors: [string, string] }[] = [];

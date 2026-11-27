@@ -452,12 +452,12 @@ const PLANET_KINDS: PlanetKind[] = ['gas', 'rocky', 'ice', 'lava', 'terran'];
  * night side) and an Earth-like world (oceans with a sun glint, continents, ice caps, drifting clouds, city
  * lights at night). All share the same soft terminator, per-pixel normals and atmosphere limb.
  */
-export function createPlanet(pos: THREE.Vector3, radius: number, a: string, b: string, ring = false, kind: PlanetKind = 'gas', seed = 0): THREE.Group {
+export function createPlanet(pos: THREE.Vector3, radius: number, a: string, b: string, ring = false, kind: PlanetKind = 'gas', seed = 0, detail = 0): THREE.Group {
   const g = new THREE.Group();
   const mat = new THREE.ShaderMaterial({
-    uniforms: { ...atmosphere, uA: { value: new THREE.Color(a) }, uB: { value: new THREE.Color(b) }, uKind: { value: PLANET_KINDS.indexOf(kind) }, uSeed: { value: seed } },
+    uniforms: { ...atmosphere, uA: { value: new THREE.Color(a) }, uB: { value: new THREE.Color(b) }, uKind: { value: PLANET_KINDS.indexOf(kind) }, uSeed: { value: seed }, uDetail: { value: detail } },
     vertexShader: `varying vec3 vP; varying vec3 vW; varying vec3 vN; void main(){ vP = position; vN = mat3(modelMatrix) * normalize(position); vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: `uniform vec3 uA, uB; uniform float uKind, uSeed; varying vec3 vP; varying vec3 vW; varying vec3 vN; ${ATMOS_PARS} ${NOISE_GLSL}
+    fragmentShader: `uniform vec3 uA, uB; uniform float uKind, uSeed, uDetail; varying vec3 vP; varying vec3 vW; varying vec3 vN; ${ATMOS_PARS} ${NOISE_GLSL}
       // Seamless noise on the sphere: three planar projections blended by the normal.
       float tri(vec3 p, float k) {
         vec3 w = abs(p); w = w * w; w /= (w.x + w.y + w.z);
@@ -492,6 +492,14 @@ export function createPlanet(pos: THREE.Vector3, radius: number, a: string, b: s
           col = mix(uA, uB, smoothstep(0.25, 0.75, broad));
           col = mix(col, cream, smoothstep(0.6, 1.0, fine) * 0.35);
           col *= 0.88 + 0.24 * n2;
+          if (uDetail > 0.0) {
+            // Huge on screen: finer turbulence, thin streaks and soft swirls so the bands stay crisp up close.
+            float n3 = fbm(vec2(p.z * 26.0 - p.x * 7.0 + t * 3.0, p.y * 160.0 + n2 * 3.0));
+            float n4 = vnoise(vec2(p.x * 90.0 + p.z * 40.0, p.y * 420.0));
+            float streak = sin(lat * 260.0 + n3 * 6.0) * 0.5 + 0.5;
+            col *= 1.0 + uDetail * (0.16 * (n3 - 0.5) + 0.08 * (n4 - 0.5));
+            col = mix(col, mix(uA, vec3(0.92, 0.97, 1.0), 0.6), smoothstep(0.75, 1.0, streak) * 0.18 * uDetail);
+          }
           vec2 sp = vec2((atan(p.z, p.x) - 0.8) * 1.6, (p.y + 0.32) * 6.0);
           float storm = smoothstep(1.0, 0.6, length(sp));
           col = mix(col, mix(uB, vec3(0.75, 0.3, 0.18), 0.5), storm * (0.6 + 0.4 * sin(length(sp) * 14.0 - uTime * 0.3)));
@@ -530,11 +538,15 @@ export function createPlanet(pos: THREE.Vector3, radius: number, a: string, b: s
           atmo = mix(uA, vec3(0.8, 0.9, 1.0), 0.5); atmoK = 0.6;
         } else if (uKind < 3.5) {
           // Lava world: black crust plates; glowing fissures and lava lakes that light the night side.
-          float h = tri(p, 3.0);
+          // Several scales of plates and cracks, so it stays sharp when it fills half the sky.
+          float h = tri(p, 3.0) * 0.8 + tri(p, 12.0) * 0.2;
           float plates = abs(tri(p, 6.0) - 0.5);
-          float crack = 1.0 - smoothstep(0.0, 0.05, plates);
-          float lake = smoothstep(0.62, 0.7, h);
-          col = mix(vec3(0.06, 0.05, 0.05), vec3(0.18, 0.13, 0.12), triN(p, 30.0)) * (0.8 + 0.4 * h);
+          float plates2 = abs(tri(p * 1.7 + 3.1, 16.0) - 0.5);
+          float plates3 = abs(triN(p * 2.3 + 7.7, 48.0) - 0.5);
+          float crack = max(1.0 - smoothstep(0.0, 0.04, plates), max((1.0 - smoothstep(0.0, 0.025, plates2)) * 0.8, (1.0 - smoothstep(0.0, 0.03, plates3)) * 0.45));
+          float lake = smoothstep(0.62, 0.68, h + (triN(p, 60.0) - 0.5) * 0.04);
+          float crust = triN(p, 30.0) * 0.45 + triN(p, 110.0) * 0.35 + triN(p, 320.0) * 0.2;
+          col = mix(vec3(0.05, 0.04, 0.04), vec3(0.22, 0.15, 0.13), crust) * (0.8 + 0.4 * h);
           float heat = max(crack, lake) * (0.75 + 0.25 * sin(uTime * 0.6 + h * 30.0));
           glow = mix(uB, uA, heat) * heat * (1.6 + 2.4 * night);
           col = mix(col, uB * 0.6, heat * 0.5);
@@ -568,17 +580,19 @@ export function createPlanet(pos: THREE.Vector3, radius: number, a: string, b: s
   g.add(sphere);
   if (ring) {
     const rIn = radius * 1.35, rOut = radius * 2.35;
-    const rg = new THREE.RingGeometry(rIn, rOut, 256, 4).rotateX(-Math.PI / 2 + 0.35);
+    const rg = new THREE.RingGeometry(rIn, rOut, detail > 0 ? 512 : 256, 4).rotateX(-Math.PI / 2 + 0.35);
     const rm = new THREE.ShaderMaterial({
       side: THREE.DoubleSide, transparent: true, depthWrite: false,
-      uniforms: { ...atmosphere, uA: { value: new THREE.Color(b) }, uC: { value: new THREE.Color(a) }, uIn: { value: rIn }, uOut: { value: rOut }, uR: { value: radius } },
+      uniforms: { ...atmosphere, uA: { value: new THREE.Color(b) }, uC: { value: new THREE.Color(a) }, uIn: { value: rIn }, uOut: { value: rOut }, uR: { value: radius }, uDetail: { value: detail } },
       vertexShader: `varying vec3 vP; varying vec3 vW; varying vec3 vC; void main(){ vP = position; vC = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz; vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-      fragmentShader: `uniform vec3 uA, uC; uniform float uIn, uOut, uR; varying vec3 vP; varying vec3 vW; varying vec3 vC; ${ATMOS_PARS} ${NOISE_GLSL}
+      fragmentShader: `uniform vec3 uA, uC; uniform float uIn, uOut, uR, uDetail; varying vec3 vP; varying vec3 vW; varying vec3 vC; ${ATMOS_PARS} ${NOISE_GLSL}
         void main(){
           float r = length(vP);
           float u = (r - uIn) / (uOut - uIn);
           // Many fine ringlets, a couple of clear gaps, denser in the middle.
           float ringlets = 0.55 + 0.25 * sin(u * 180.0) * sin(u * 67.0) + 0.2 * (vnoise(vec2(u * 400.0, 0.5)) - 0.5);
+          // Seen from right under it: thousands of hair-thin ringlets on top.
+          ringlets += uDetail * (0.12 * sin(u * 1400.0 + vnoise(vec2(u * 90.0, 2.0)) * 6.0) + 0.1 * (vnoise(vec2(u * 2600.0, 3.0)) - 0.5));
           float gap = smoothstep(0.0, 0.012, abs(u - 0.62)) * smoothstep(0.0, 0.006, abs(u - 0.31));
           float density = ringlets * gap * smoothstep(0.0, 0.05, u) * smoothstep(1.0, 0.85, u) * (0.6 + 0.4 * sin(u * 3.14));
           vec3 col = mix(uA, mix(uC, vec3(1.0, 0.95, 0.85), 0.5), vnoise(vec2(u * 60.0, 1.0)));

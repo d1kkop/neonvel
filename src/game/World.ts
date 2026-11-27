@@ -72,7 +72,7 @@ export interface CarSetup {
   paint: string;
   accent: string;
   /** Physics overrides from the car's stats. */
-  spec?: { topSpeed: number; accel: number; grip: number; brake?: number; wheelbase?: number; maxSteer?: number };
+  spec?: { topSpeed: number; accel: number; grip: number; brake?: number; wheelbase?: number; maxSteer?: number; drag?: number };
   name?: string;
   tier?: 'free' | 'pro' | 'elite';
 }
